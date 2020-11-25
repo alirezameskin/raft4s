@@ -1,0 +1,22 @@
+# Created by .ignore support plugin (hsz.mobi)
+### Scala template
+*.class
+*.log
+### SBT template
+# Simple Build Tool
+# http://www.scala-sbt.org/release/docs/Getting-Started/Directories.html#configuring-version-control
+
+*.iml
+.idea/
+dist/*
+target
+lib_managed/
+src_managed/
+project/target/
+project/boot/
+project/plugins/project/
+project/project/
+.history
+.cache
+.lib/
+
