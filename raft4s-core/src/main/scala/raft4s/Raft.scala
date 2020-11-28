@@ -7,14 +7,16 @@ import raft4s.log.ReplicatedLog
 import raft4s.node.{LeaderNode, NodeState}
 import raft4s.rpc._
 
-class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: ReplicatedLog, val state: Ref[IO, NodeState])(implicit CS: ContextShift[IO]) {
+class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: ReplicatedLog, val state: Ref[IO, NodeState])(
+  implicit CS: ContextShift[IO]
+) {
 
   def start(): IO[Unit] =
     for {
       logState <- log.state
       actions  <- state.modify(_.onTimer(logState))
       _        <- runActions(actions)
-    }  yield ()
+    } yield ()
 
   def onReceive(msg: VoteRequest): IO[VoteResponse] =
     for {
@@ -28,7 +30,6 @@ class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: Rep
       actions  <- state.modify(_.onReceive(logState, msg))
       _        <- runActions(actions)
     } yield ()
-
 
   def onReceive(msg: AppendEntries): IO[AppendEntriesResponse] =
     for {
@@ -44,8 +45,7 @@ class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: Rep
       _        <- runActions(actions)
     } yield ()
 
-
-  def onCommand[T](command: Command[T]): IO[T] = {
+  def onCommand[T](command: Command[T]): IO[T] =
     for {
       deferred <- Deferred[IO, T]
       state_   <- state.get
@@ -53,26 +53,23 @@ class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: Rep
       _        <- runActions(actions)
       result   <- deferred.get
     } yield result
-  }
 
-  private def onCommand[T](node: NodeState, command: Command[T], deferred: Deferred[IO, T]): IO[List[Action]] = {
+  private def onCommand[T](node: NodeState, command: Command[T], deferred: Deferred[IO, T]): IO[List[Action]] =
     node match {
       case LeaderNode(_, _, currentTerm, _, _) =>
         for {
           _       <- log.append(currentTerm, command, deferred)
-          actions <- IO {node.onReplicateLog() }
+          actions <- IO(node.onReplicateLog())
         } yield actions
 
       case _ =>
         IO.raiseError(new RuntimeException("Only leader node can run commands"))
     }
 
-  }
-
   private def runActions(actions: List[Action]): IO[Unit] =
     actions.parTraverse(a => runAction(a)) *> IO.unit
 
-  private def runAction(action: Action): IO[Unit] = {
+  private def runAction(action: Action): IO[Unit] =
     action match {
       case RequestForVote(peerId, request) =>
         for {
@@ -81,11 +78,11 @@ class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: Rep
         } yield res
 
       case ReplicateLog(peerId, term, sentLength) =>
-          for {
-            append   <- log.getAppendEntries(nodeId, term, sentLength)
-            response <- members(peerId).send(append)
-            _        <- this.onReceive(response)
-          } yield ()
+        for {
+          append   <- log.getAppendEntries(nodeId, term, sentLength)
+          response <- members(peerId).send(append)
+          _        <- this.onReceive(response)
+        } yield ()
 
       case CommitLogs(ackedLength, minAckes) =>
         log.commitLogs(ackedLength, minAckes)
@@ -96,5 +93,4 @@ class Raft(val nodeId: String, val members: Map[String, RpcClient], val log: Rep
       case CancelElectionTimer =>
         IO(println("Cancel election"))
     }
-  }
 }

@@ -14,26 +14,25 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
 
   def getAppendEntries(leaderId: String, term: Long, sentLength: Long): IO[AppendEntries] =
     for {
-      length <- log.length
+      length       <- log.length
       commitLength <- log.commitLength
-      entries <- (sentLength until length).toList.traverse(i => log.get(i))
+      entries      <- (sentLength until length).toList.traverse(i => log.get(i))
       prevLogTerm = if (sentLength > 0 && entries.nonEmpty) entries.last.term else 0
     } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, commitLength, entries)
 
   def state: IO[LogState] =
     for {
       length <- log.length
-      term <- if (length > 0) log.get(length - 1).map(e => Some(e.term)) else IO(None)
+      term   <- if (length > 0) log.get(length - 1).map(e => Some(e.term)) else IO(None)
     } yield LogState(length, term)
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[IO, T]): IO[LogEntry] =
     for {
-      length   <- log.length
+      length <- log.length
       logEntry = LogEntry(term, length, command)
-      _        <- log.put(logEntry.index, logEntry)
-      _        = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[IO, Any]])
+      _ <- log.put(logEntry.index, logEntry)
+      _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[IO, Any]])
     } yield logEntry
-
 
   def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): IO[Unit] =
     for {
@@ -48,13 +47,13 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
     val acked: Long => Boolean = index => ackedLength.count(_._2 >= index) >= minAckes
 
     for {
-      logLength <- log.length
+      logLength    <- log.length
       commitLength <- log.commitLength
-      _ <- (commitLength until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
+      _            <- (commitLength until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
     } yield ()
   }
 
-  private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] = {
+  private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] =
     if (entries.nonEmpty && logLength > leaderLogLength)
       log.get(logLength).flatMap { entry =>
         if (entry.term != entries.head.term) {
@@ -62,7 +61,6 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
         } else IO.unit
       }
     else IO.unit
-  }
 
   private def putEntries(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] = {
     val logEntries = if (leaderLogLength + entries.size > logLength) {
@@ -70,16 +68,15 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
       (start until entries.length).map(i => entries(i.toInt)).toList
     } else List.empty
 
-    logEntries.traverse { entry => log.put(entry.index, entry) } *> IO.unit
+    logEntries.traverse(entry => log.put(entry.index, entry)) *> IO.unit
   }
 
-  private def commit(index: Long): IO[Unit] = {
+  private def commit(index: Long): IO[Unit] =
     for {
       entry <- log.get(index)
       _     <- applyCommand(index, entry.command)
       _     <- log.updateCommitLength(index + 1)
     } yield ()
-  }
 
   private def applyCommand(index: Long, command: Command[_]): IO[Unit] = {
     val result = command match {

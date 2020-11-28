@@ -1,5 +1,3 @@
 package raft4s.rpc
 
-trait ReadCommand[OUT] extends Command[OUT] {
-
-}
+trait ReadCommand[OUT] extends Command[OUT] {}

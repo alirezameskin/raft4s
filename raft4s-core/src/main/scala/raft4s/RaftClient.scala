@@ -13,13 +13,11 @@ trait RaftClient[F[_]] {
 object RaftClient {
   def apply(raft: Raft)(implicit CS: ContextShift[IO]): RaftClient[IO] = new RaftClient[IO]() {
 
-    override def write(command: WriteCommand[String]): IO[String] = {
+    override def write(command: WriteCommand[String]): IO[String] =
       IO(println(s"write command ${command}")) *>
-      raft.onCommand(command)
-    }
+        raft.onCommand(command)
 
-    override def read(command: ReadCommand[String]): IO[String] = {
+    override def read(command: ReadCommand[String]): IO[String] =
       IO(println(s"Read command ${command}")) *> ???
-    }
   }
 }

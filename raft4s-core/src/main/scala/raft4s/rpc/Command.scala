@@ -1,4 +1,3 @@
 package raft4s.rpc
 
-trait Command[OUT] {
-}
+trait Command[OUT] {}

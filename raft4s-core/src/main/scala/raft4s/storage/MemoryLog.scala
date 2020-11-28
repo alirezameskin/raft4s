@@ -5,16 +5,16 @@ import raft4s.log.{Log, LogEntry}
 
 import scala.collection.concurrent.TrieMap
 
-class MemoryLog extends Log{
+class MemoryLog extends Log {
   val map = TrieMap[Long, LogEntry]()
 
   var _commitIndex: Long = 0
 
   def length: IO[Long] = IO(map.size)
 
-  def get(index: Long): IO[LogEntry] = IO { map.get(index).orNull }
+  def get(index: Long): IO[LogEntry] = IO(map.get(index).orNull)
 
-  override def commitLength: IO[Long] = IO {_commitIndex }
+  override def commitLength: IO[Long] = IO(_commitIndex)
 
   override def updateCommitLength(index: Long): IO[Unit] = IO { _commitIndex = index }
 
@@ -23,5 +23,5 @@ class MemoryLog extends Log{
     logEntry
   }
 
-  override def delete(index: Long): IO[Unit] = IO {map.remove(index)}
+  override def delete(index: Long): IO[Unit] = IO(map.remove(index))
 }

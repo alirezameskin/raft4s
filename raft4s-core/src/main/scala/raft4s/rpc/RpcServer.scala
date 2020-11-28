@@ -9,7 +9,6 @@ trait RpcServer {
   def receive(appendEntries: AppendEntries): IO[AppendEntriesResponse]
 }
 
-
 object RpcServer {
   def apply(raft: Raft): RpcServer = new RpcServer() {
     override def receive(voteRequest: VoteRequest): IO[VoteResponse] = raft.onReceive(voteRequest)
