@@ -12,4 +12,6 @@ trait Log {
   def get(index: Long): IO[LogEntry]
 
   def put(index: Long, logEntry: LogEntry): IO[LogEntry]
+
+  def delete(index: Long): IO[Unit]
 }

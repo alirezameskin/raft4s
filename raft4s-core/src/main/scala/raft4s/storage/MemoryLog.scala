@@ -22,4 +22,6 @@ class MemoryLog extends Log{
     map.put(index, logEntry)
     logEntry
   }
+
+  override def delete(index: Long): IO[Unit] = IO {map.remove(index)}
 }

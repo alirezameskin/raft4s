@@ -31,20 +31,16 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
       length   <- log.length
       logEntry = LogEntry(term, length, command)
       _        <- log.put(logEntry.index, logEntry)
-      _         = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[IO, Any]])
+      _        = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[IO, Any]])
     } yield logEntry
 
 
-  def appendEntries(entries: List[LogEntry], logLength: Long, leaderCommit: Long): IO[Unit] =
-    log.length.flatMap { length =>
-
-      val logEntries = if (logLength + entries.size > length) {
-        val start = length - logLength
-        (start until entries.length).map(i => entries(i.toInt)).toList
-      } else List.empty
-
-      logEntries.traverse { entry => log.put(entry.index, entry) } *> IO.unit
-    }
+  def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): IO[Unit] =
+    for {
+      logLength <- log.length
+      _         <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
+      _         <- putEntries(entries, logLength, leaderLogLength)
+    } yield ()
 
   def commitLogs(ackedLength: Map[String, Long], minAckes: Int): IO[Unit] = {
     log.length.flatMap { length =>
@@ -77,5 +73,23 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
         result *> IO.unit
       }
     }
+  }
+
+  private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] =
+    if (entries.nonEmpty && logLength > leaderLogLength)
+      log.get(logLength).flatMap {entry =>
+        if (entry.term != entries.head.term) {
+          (leaderLogLength until logLength).toList.traverse(log.delete) *> IO.unit
+        } else IO.unit
+      }
+    else IO.unit
+
+  private def putEntries(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] = {
+    val logEntries = if (leaderLogLength + entries.size > logLength) {
+      val start = logLength - leaderLogLength
+      (start until entries.length).map(i => entries(i.toInt)).toList
+    } else List.empty
+
+    logEntries.traverse { entry => log.put(entry.index, entry) } *> IO.unit
   }
 }
