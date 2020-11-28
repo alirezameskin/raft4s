@@ -75,10 +75,16 @@ object RaftTest extends App {
     s <- raft.state.get
   _ = println("Node 1", s)
   _ = println("Sending a new command")
-  res <- raft.onCommand(Put("name", "Alireza"))
+  res <- raft.onCommand(Put("name", "Reza"))
   _ = println(s"Command output : ${res}")
 
     res <- raft.onCommand(Put("lastname", "Meskin"))
+    _ = println(s"Command output : ${res}")
+
+    res <- raft.onCommand(Get("name"))
+    _ = println(s"Command output : ${res}")
+
+    res <- raft.onCommand(Put("name", "Alireza"))
     _ = println(s"Command output : ${res}")
 
       res <- raft.onCommand(Get("name"))
@@ -89,5 +95,11 @@ object RaftTest extends App {
 
   println(log2.map)
   println(log3.map)
+
+  scala.Predef.ensuring(stateMachine2.applyRead(Get("name")) == "Alireza")
+  scala.Predef.ensuring(stateMachine3.applyRead(Get("name")) == "Alireza")
+
+  scala.Predef.ensuring(stateMachine2.applyRead(Get("lastname")) == "Meskin")
+  scala.Predef.ensuring(stateMachine3.applyRead(Get("lastname")) == "Meskin")
 
 }
