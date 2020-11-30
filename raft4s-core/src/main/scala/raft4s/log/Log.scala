@@ -1,17 +1,15 @@
 package raft4s.log
 
-import cats.effect.IO
+trait Log[F[_]] {
+  def length: F[Long]
 
-trait Log {
-  def length: IO[Long]
+  def commitLength: F[Long]
 
-  def commitLength: IO[Long]
+  def updateCommitLength(index: Long): F[Unit]
 
-  def updateCommitLength(index: Long): IO[Unit]
+  def get(index: Long): F[LogEntry]
 
-  def get(index: Long): IO[LogEntry]
+  def put(index: Long, logEntry: LogEntry): F[LogEntry]
 
-  def put(index: Long, logEntry: LogEntry): IO[LogEntry]
-
-  def delete(index: Long): IO[Unit]
+  def delete(index: Long): F[Unit]
 }

@@ -1,27 +1,41 @@
 package raft4s.storage
 
-import cats.effect.IO
+import cats.Monad
 import raft4s.log.{Log, LogEntry}
 
 import scala.collection.concurrent.TrieMap
 
-class MemoryLog extends Log {
-  val map = TrieMap[Long, LogEntry]()
-
+class MemoryLog[F[_]: Monad] extends Log[F] {
   var _commitIndex: Long = 0
 
-  def length: IO[Long] = IO(map.size)
+  val map = TrieMap[Long, LogEntry]()
 
-  def get(index: Long): IO[LogEntry] = IO(map.get(index).orNull)
+  override def length: F[Long] =
+    Monad[F].pure(map.size)
 
-  override def commitLength: IO[Long] = IO(_commitIndex)
+  override def get(index: Long): F[LogEntry] =
+    Monad[F].pure(map.get(index).orNull)
 
-  override def updateCommitLength(index: Long): IO[Unit] = IO { _commitIndex = index }
+  override def commitLength: F[Long] =
+    Monad[F].pure(_commitIndex)
 
-  override def put(index: Long, logEntry: LogEntry): IO[LogEntry] = IO {
-    map.put(index, logEntry)
-    logEntry
-  }
+  override def updateCommitLength(index: Long): F[Unit] =
+    Monad[F].pure {
+      _commitIndex = index
+    }
 
-  override def delete(index: Long): IO[Unit] = IO(map.remove(index))
+  override def put(index: Long, logEntry: LogEntry): F[LogEntry] =
+    Monad[F].pure {
+      map.put(index, logEntry)
+      logEntry
+    }
+
+  override def delete(index: Long): F[Unit] =
+    Monad[F].pure {
+      map.remove(index)
+    }
+}
+
+object MemoryLog {
+  def empty[F[_]: Monad] = new MemoryLog[F]
 }

@@ -11,7 +11,7 @@ trait RaftClient[F[_]] {
 }
 
 object RaftClient {
-  def apply(raft: Raft)(implicit CS: ContextShift[IO]): RaftClient[IO] = new RaftClient[IO]() {
+  def apply(raft: Raft[IO])(implicit CS: ContextShift[IO]): RaftClient[IO] = new RaftClient[IO]() {
 
     override def write(command: WriteCommand[String]): IO[String] =
       IO(println(s"write command ${command}")) *>

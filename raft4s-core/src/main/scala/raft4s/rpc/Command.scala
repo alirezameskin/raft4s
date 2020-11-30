@@ -1,3 +1,5 @@
 package raft4s.rpc
 
-trait Command[OUT] {}
+sealed trait Command[OUT]
+trait ReadCommand[OUT]  extends Command[OUT]
+trait WriteCommand[OUT] extends Command[OUT]

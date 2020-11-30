@@ -1,9 +1,7 @@
 package raft4s.rpc
 
-import cats.effect.IO
+trait RpcClient[F[_]] {
+  def send(voteRequest: VoteRequest): F[VoteResponse]
 
-trait RpcClient {
-  def send(voteRequest: VoteRequest): IO[VoteResponse]
-
-  def send(appendEntries: AppendEntries): IO[AppendEntriesResponse]
+  def send(appendEntries: AppendEntries): F[AppendEntriesResponse]
 }

@@ -2,8 +2,8 @@ package raft4s
 
 import raft4s.rpc.{ReadCommand, WriteCommand}
 
-trait StateMachine {
-  def applyWrite: PartialFunction[(Long, WriteCommand[_]), Any]
+trait StateMachine[F[_]] {
+  def applyWrite: PartialFunction[(Long, WriteCommand[_]), F[Any]]
 
-  def applyRead: PartialFunction[ReadCommand[_], Any]
+  def applyRead: PartialFunction[ReadCommand[_], F[Any]]
 }

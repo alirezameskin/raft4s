@@ -1,18 +1,18 @@
 package raft4s.log
 
+import cats.Monad
 import cats.implicits._
-import cats.effect.IO
 import cats.effect.concurrent.Deferred
 import raft4s.StateMachine
 import raft4s.rpc.{AppendEntries, Command, ReadCommand, WriteCommand}
 
 import scala.collection.concurrent.TrieMap
 
-class ReplicatedLog(log: Log, stateMachine: StateMachine) {
+class ReplicatedLog[F[_]: Monad](log: Log[F], stateMachine: StateMachine[F]) {
 
-  val deferreds = TrieMap[Long, Deferred[IO, Any]]()
+  private val deferreds = TrieMap[Long, Deferred[F, Any]]()
 
-  def getAppendEntries(leaderId: String, term: Long, sentLength: Long): IO[AppendEntries] =
+  def getAppendEntries(leaderId: String, term: Long, sentLength: Long): F[AppendEntries] =
     for {
       length       <- log.length
       commitLength <- log.commitLength
@@ -20,21 +20,21 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
       prevLogTerm = if (sentLength > 0 && entries.nonEmpty) entries.last.term else 0
     } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, commitLength, entries)
 
-  def state: IO[LogState] =
+  def state: F[LogState] =
     for {
       length <- log.length
-      term   <- if (length > 0) log.get(length - 1).map(e => Some(e.term)) else IO(None)
+      term   <- if (length > 0) log.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
     } yield LogState(length, term)
 
-  def append[T](term: Long, command: Command[T], deferred: Deferred[IO, T]): IO[LogEntry] =
+  def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
     for {
       length <- log.length
       logEntry = LogEntry(term, length, command)
       _ <- log.put(logEntry.index, logEntry)
-      _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[IO, Any]])
+      _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
     } yield logEntry
 
-  def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): IO[Unit] =
+  def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Unit] =
     for {
       logLength    <- log.length
       commitLength <- log.commitLength
@@ -43,7 +43,7 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
       _            <- (commitLength until leaderCommit).toList.traverse(commit)
     } yield ()
 
-  def commitLogs(ackedLength: Map[String, Long], minAckes: Int): IO[Unit] = {
+  def commitLogs(ackedLength: Map[String, Long], minAckes: Int): F[Unit] = {
     val acked: Long => Boolean = index => ackedLength.count(_._2 >= index) >= minAckes
 
     for {
@@ -53,46 +53,45 @@ class ReplicatedLog(log: Log, stateMachine: StateMachine) {
     } yield ()
   }
 
-  private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] =
+  private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): F[Unit] =
     if (entries.nonEmpty && logLength > leaderLogLength)
       log.get(logLength).flatMap { entry =>
         if (entry.term != entries.head.term) {
-          (leaderLogLength until logLength).toList.traverse(log.delete) *> IO.unit
-        } else IO.unit
+          (leaderLogLength until logLength).toList.traverse(log.delete) *> Monad[F].unit
+        } else Monad[F].unit
       }
-    else IO.unit
+    else Monad[F].unit
 
-  private def putEntries(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): IO[Unit] = {
+  private def putEntries(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): F[Unit] = {
     val logEntries = if (leaderLogLength + entries.size > logLength) {
       val start = logLength - leaderLogLength
       (start until entries.length).map(i => entries(i.toInt)).toList
     } else List.empty
 
-    logEntries.traverse(entry => log.put(entry.index, entry)) *> IO.unit
+    logEntries.traverse(entry => log.put(entry.index, entry)) *> Monad[F].unit
   }
 
-  private def commit(index: Long): IO[Unit] =
+  private def commit(index: Long): F[Unit] =
     for {
       entry <- log.get(index)
       _     <- applyCommand(index, entry.command)
       _     <- log.updateCommitLength(index + 1)
     } yield ()
 
-  private def applyCommand(index: Long, command: Command[_]): IO[Unit] = {
-    val result = command match {
+  private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
+    val output = command match {
       case command: ReadCommand[_] =>
         stateMachine.applyRead.apply(command)
 
       case command: WriteCommand[_] =>
         stateMachine.applyWrite.apply((index, command))
-
-      case _ =>
-        ()
     }
 
-    deferreds.get(index) match {
-      case Some(deferred) => deferred.complete(result)
-      case None           => IO.unit
+    output.flatMap { result =>
+      deferreds.get(index) match {
+        case Some(deferred) => deferred.complete(result)
+        case None           => Monad[F].unit
+      }
     }
   }
 
