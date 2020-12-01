@@ -2,15 +2,15 @@ package raft4s.node
 
 import raft4s.log.LogState
 import raft4s.rpc._
-import raft4s.{Action, CancelElectionTimer, ReplicateLog, RequestForVote, StartElectionTimer}
+import raft4s.{Action, ReplicateLog, RequestForVote}
 
 case class CandidateNode(
   nodeId: String,
   nodes: List[String],
   currentTerm: Long,
   lastTerm: Long,
-  votedFor: Option[String],
-  votedReceived: Set[String]
+  votedFor: Option[String] = None,
+  votedReceived: Set[String] = Set.empty
 ) extends NodeState {
 
   override def onTimer(logState: LogState): (NodeState, List[Action]) = {
@@ -22,7 +22,7 @@ case class CandidateNode(
 
     (
       this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(nodeId), votedReceived = Set(nodeId)),
-      StartElectionTimer :: actions
+      actions
     )
   }
 
@@ -48,7 +48,7 @@ case class CandidateNode(
     val quorumSize     = (nodes.length + 1) / 2
 
     if (msg.term > currentTerm)
-      (FollowerNode(nodeId, nodes, msg.term), List(CancelElectionTimer))
+      (FollowerNode(nodeId, nodes, msg.term), List.empty)
     else if (msg.term == currentTerm && msg.granted && votedReceived_.size >= quorumSize) {
       val ackedLength = nodes.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
       val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, 0L)).toMap

@@ -2,7 +2,7 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
-import raft4s.{CancelElectionTimer, ReplicateLog, RequestForVote, StartElectionTimer}
+import raft4s.{ReplicateLog, RequestForVote}
 import raft4s.log.{LogEntry, LogState}
 import raft4s.rpc.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse, WriteCommand}
 
@@ -29,7 +29,7 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
     val voteRequest     = VoteRequest("node1", 11, 100, 10)
     val voteRequests    = List(RequestForVote("node2", voteRequest), RequestForVote("node3", voteRequest))
     val expectedState   = CandidateNode(nodeId, nodes, 11, 10, Some("node1"), Set("node1"))
-    val expectedActions = StartElectionTimer :: voteRequests
+    val expectedActions = voteRequests
 
     val logState = LogState(100, Some(10))
 
@@ -65,7 +65,7 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
     val logState = LogState(100, Some(10))
 
     val expectedState = FollowerNode(nodeId, nodes, 11, None, None)
-    node.onReceive(logState, VoteResponse("node2", 11, false)) shouldBe (expectedState, List(CancelElectionTimer))
+    node.onReceive(logState, VoteResponse("node2", 11, false)) shouldBe (expectedState, List.empty)
   }
 
   it should "stay in the candidate state and adder the voter id in the Voted list" in {
