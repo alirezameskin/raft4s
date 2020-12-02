@@ -2,10 +2,9 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
-import raft4s.RequestForVote
+import raft4s.{AnnounceLeader, RequestForVote}
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
-import raft4s.rpc._
 
 class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
   val nodeId = "node1"
@@ -67,7 +66,10 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedNode = FollowerNode(nodeId, nodes, 10, currentLeader = Some("node2"))
     val request      = AppendEntries("node2", 10, 100, 10, 100, List(LogEntry(10, 101, new WriteCommand[String] {})))
 
-    node.onReceive(logState, request) shouldBe (expectedNode, AppendEntriesResponse("node1", 10, 101, true))
+    node.onReceive(logState, request) shouldBe (expectedNode, (
+      AppendEntriesResponse("node1", 10, 101, true),
+      List(AnnounceLeader("node2"))
+    ))
   }
 
   it should "reject AppendEntries when there is at least one missed log entry" in {
@@ -77,7 +79,7 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedNode = FollowerNode(nodeId, nodes, 10)
     val request      = AppendEntries("node2", 10, 105, 10, 105, List(LogEntry(10, 106, new WriteCommand[String] {})))
 
-    node.onReceive(logState, request) shouldBe (expectedNode, AppendEntriesResponse("node1", 10, 0, false))
+    node.onReceive(logState, request) shouldBe (expectedNode, (AppendEntriesResponse("node1", 10, 0, false), List.empty))
 
   }
 }

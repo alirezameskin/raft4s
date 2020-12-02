@@ -3,7 +3,6 @@ package raft4s.node
 import raft4s._
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
-import raft4s.rpc._
 
 case class FollowerNode(
   nodeId: String,
@@ -13,8 +12,15 @@ case class FollowerNode(
   currentLeader: Option[String] = None
 ) extends NodeState {
 
-  override def onTimer(logState: LogState): (NodeState, List[Action]) =
-    CandidateNode(nodeId, nodes, currentTerm, logState.lastTerm.getOrElse(0L)).onTimer(logState)
+  override def onTimer(logState: LogState): (NodeState, List[Action]) = {
+    val (state, actions) = CandidateNode(nodeId, nodes, currentTerm, logState.lastTerm.getOrElse(0L)).onTimer(logState)
+    if (state.isInstanceOf[LeaderNode])
+      (state, actions)
+    else if (this.currentLeader.isDefined)
+      (state, ResetLeaderAnnouncer :: actions)
+    else
+      (state, actions)
+  }
 
   override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse) = {
 
@@ -32,7 +38,7 @@ case class FollowerNode(
   override def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action]) =
     (this, List.empty)
 
-  override def onReceive(logState: LogState, msg: AppendEntries): (NodeState, AppendEntriesResponse) = {
+  override def onReceive(logState: LogState, msg: AppendEntries): (NodeState, (AppendEntriesResponse, List[Action])) = {
     val currentTerm_ = if (msg.term > currentTerm) msg.term else currentTerm
     val votedFor_    = if (msg.term > currentTerm) None else votedFor
 
@@ -43,10 +49,16 @@ case class FollowerNode(
     if (msg.term == currentTerm_ && logOK)
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
-        AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true)
+        (
+          AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
+          if (currentLeader.contains(msg.leaderId)) List.empty else List(AnnounceLeader(msg.leaderId))
+        )
       )
     else
-      (this.copy(currentTerm = currentTerm_, votedFor = votedFor_), AppendEntriesResponse(nodeId, currentTerm_, 0, false))
+      (
+        this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
+        (AppendEntriesResponse(nodeId, currentTerm_, 0, false), List.empty)
+      )
   }
 
   override def onReceive(logState: LogState, msg: AppendEntriesResponse): (NodeState, List[Action]) =
@@ -54,4 +66,6 @@ case class FollowerNode(
 
   override def onReplicateLog(): List[Action] =
     List.empty
+
+  override def leader: Option[String] = currentLeader
 }

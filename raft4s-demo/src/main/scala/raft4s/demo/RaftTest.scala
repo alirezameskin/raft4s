@@ -6,7 +6,7 @@ import cats.effect.{ContextShift, IO, Timer}
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.rpc._
 import raft4s.storage.memory.MemoryStorage
-import raft4s.{Address, Configuration, Raft, Server}
+import raft4s.{Address, Configuration, Raft}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -18,11 +18,17 @@ object RaftTest extends App {
   val clients = scala.collection.mutable.Map.empty[String, RpcClient[IO]]
 
   implicit val clientBuilder = new RpcClientBuilder[IO] {
-    override def build(server: Server): RpcClient[IO] = new RpcClient[IO] {
-      override def send(voteRequest: VoteRequest): IO[VoteResponse] = clients(server.id).send(voteRequest)
+    override def build(address: Address): RpcClient[IO] = new RpcClient[IO] {
+      override def send(voteRequest: VoteRequest): IO[VoteResponse] = clients(address.id).send(voteRequest)
 
-      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] = clients(server.id).send(appendEntries)
+      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] = clients(address.id).send(appendEntries)
     }
+  }
+
+  implicit val serverBuilder = new RpcServerBuilder[IO] {
+    override def build(address: Address, raft: Raft[IO]): IO[RpcServer[IO]] = IO(new RpcServer[IO] {
+      override def start(): IO[Unit] = IO.unit
+    })
   }
 
   val nodes = List("node1", "node2", "node3")
@@ -75,8 +81,9 @@ object RaftTest extends App {
 
   def createNode(nodeId: String, nodes: List[String]): Raft[IO] = {
     val configuration = Configuration(
-      local = Server(nodeId, Address("localhost", 8090)),
-      members = nodes.filterNot(_ == nodeId).map(id => Server(id, Address("localhost", 8090)))
+      local = Address(nodeId, 8090),
+      members = nodes.filterNot(_ == nodeId).map(id => Address(id, 8090)),
+      FiniteDuration(0, TimeUnit.SECONDS)
     )
     val node = Raft.make[IO](configuration, MemoryStorage.empty[IO], new KvStateMachine())
     node.unsafeRunSync()
@@ -85,9 +92,11 @@ object RaftTest extends App {
   def createClient(node: Raft[IO]): RpcClient[IO] =
     new RpcClient[IO] {
       override def send(voteRequest: VoteRequest): IO[VoteResponse] =
-        IO(println(s"vote request received ${voteRequest} on node ${node.nodeId}")) *> node.onReceive(voteRequest)
+        IO(println(s"vote request received ${voteRequest} on node ${node.config.local.id}")) *> node.onReceive(voteRequest)
 
       override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
-        IO(println(s"Append entries request received ${appendEntries} on node ${node.nodeId}")) *> node.onReceive(appendEntries)
+        IO(println(s"Append entries request received ${appendEntries} on node ${node.config.local.id}")) *> node.onReceive(
+          appendEntries
+        )
     }
 }

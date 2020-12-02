@@ -2,8 +2,7 @@ package raft4s.node
 
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
-import raft4s.rpc._
-import raft4s.{Action, CommitLogs, ReplicateLog}
+import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog}
 
 case class LeaderNode(
   nodeId: String,
@@ -30,7 +29,7 @@ case class LeaderNode(
   override def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action]) =
     (this, List.empty)
 
-  override def onReceive(logState: LogState, msg: AppendEntries): (NodeState, AppendEntriesResponse) = {
+  override def onReceive(logState: LogState, msg: AppendEntries): (NodeState, (AppendEntriesResponse, List[Action])) = {
     val currentTerm_ = if (msg.term > currentTerm) msg.term else currentTerm
     val logOK_       = logState.length >= msg.logLength
     val logOK        = if (logOK_ && msg.logLength > 0) logState.lastTerm.contains(msg.logTerm) else logOK_
@@ -38,10 +37,13 @@ case class LeaderNode(
     if (msg.term == currentTerm_ && logOK)
       (
         FollowerNode(nodeId, nodes, currentTerm_, None, Some(msg.leaderId)),
-        AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true)
+        (
+          AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
+          List(AnnounceLeader(msg.leaderId))
+        )
       )
     else
-      (this, AppendEntriesResponse(nodeId, currentTerm, 0, false))
+      (this, (AppendEntriesResponse(nodeId, currentTerm, 0, false), List.empty))
   }
 
   override def onReceive(logState: LogState, msg: AppendEntriesResponse): (NodeState, List[Action]) =
@@ -70,4 +72,6 @@ case class LeaderNode(
     nodes.filterNot(_ == nodeId).map { peer =>
       ReplicateLog(peer, currentTerm, sentLength(peer))
     }
+
+  override def leader: Option[String] = Some(nodeId)
 }

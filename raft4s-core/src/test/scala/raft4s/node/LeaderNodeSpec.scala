@@ -2,7 +2,7 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
-import raft4s.{CommitLogs, ReplicateLog}
+import raft4s.{AnnounceLeader, CommitLogs, ReplicateLog}
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
 
@@ -48,7 +48,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedNode = node
     val request      = AppendEntries("node2", 9, 99, 9, 99, List(LogEntry(9, 100, new WriteCommand[String] {})))
 
-    node.onReceive(logState, request) shouldBe (expectedNode, AppendEntriesResponse(nodeId, 10, 0, false))
+    node.onReceive(logState, request) shouldBe (expectedNode, (AppendEntriesResponse(nodeId, 10, 0, false), List.empty))
   }
 
   it should "turn to a Follower node when gets AppendEntries with higher Term" in {
@@ -58,7 +58,10 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedNode = FollowerNode(nodeId, nodes, 11, None, Some("node2"))
     val request      = AppendEntries("node2", 11, 100, 10, 100, List(LogEntry(11, 101, new WriteCommand[String] {})))
 
-    node.onReceive(logState, request) shouldBe (expectedNode, AppendEntriesResponse(nodeId, 11, 101, true))
+    node.onReceive(logState, request) shouldBe (expectedNode, (
+      AppendEntriesResponse(nodeId, 11, 101, true),
+      List(AnnounceLeader("node2"))
+    ))
   }
 
   it should "turn to a Follower node when gets AppendEntriesResponse with higher Term" in {

@@ -2,7 +2,7 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
-import raft4s.{ReplicateLog, RequestForVote}
+import raft4s.{AnnounceLeader, ReplicateLog, RequestForVote}
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
 
@@ -99,7 +99,7 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
       ackedLength = Map("node2" -> 100, "node3" -> 100)
     )
 
-    val expectedActions = List(ReplicateLog("node2", 10, 0), ReplicateLog("node3", 10, 0))
+    val expectedActions = List(AnnounceLeader("node1"), ReplicateLog("node2", 10, 0), ReplicateLog("node3", 10, 0))
 
     node.onReceive(logState, VoteResponse("node2", 10, true)) shouldBe (expectedState, expectedActions)
   }
@@ -115,7 +115,7 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedResponse = AppendEntriesResponse(nodeId, 11, 101, true)
     val expectedState    = FollowerNode(nodeId, nodes, 11, None, Some("node2"))
 
-    node.onReceive(logState, request) shouldBe (expectedState, expectedResponse)
+    node.onReceive(logState, request) shouldBe (expectedState, (expectedResponse, List(AnnounceLeader("node2"))))
   }
 
   it should "stays in Candidate state and reject the AppendEntries request after receiving AppendEntries with lower Term" in {
@@ -126,6 +126,6 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
     val request =
       AppendEntries("node2", term = 10, logLength = 99, logTerm = 10, leaderCommit = 99, List(LogEntry(10, 100, command)))
 
-    node.onReceive(logState, request) shouldBe (node, AppendEntriesResponse(nodeId, 10, 0, false))
+    node.onReceive(logState, request) shouldBe (node, (AppendEntriesResponse(nodeId, 10, 0, false), List.empty))
   }
 }

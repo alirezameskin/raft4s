@@ -8,7 +8,7 @@ abstract class NodeState {
 
   def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse)
 
-  def onReceive(logState: LogState, msg: AppendEntries): (NodeState, AppendEntriesResponse)
+  def onReceive(logState: LogState, msg: AppendEntries): (NodeState, (AppendEntriesResponse, List[Action]))
 
   def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action])
 
@@ -17,4 +17,6 @@ abstract class NodeState {
   def onTimer(logState: LogState): (NodeState, List[Action])
 
   def onReplicateLog(): List[Action]
+
+  def leader: Option[String]
 }

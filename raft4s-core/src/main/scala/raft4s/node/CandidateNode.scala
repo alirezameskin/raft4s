@@ -2,8 +2,7 @@ package raft4s.node
 
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
-import raft4s.rpc._
-import raft4s.{Action, ReplicateLog, RequestForVote}
+import raft4s.{Action, AnnounceLeader, ReplicateLog, RequestForVote}
 
 case class CandidateNode(
   nodeId: String,
@@ -26,9 +25,8 @@ case class CandidateNode(
       val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, 0L)).toMap
       val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, 0))
 
-      (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), actions)
+      (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), AnnounceLeader(nodeId) :: actions)
     } else {
-
       (
         this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(nodeId), votedReceived = Set(nodeId)),
         actions
@@ -54,7 +52,7 @@ case class CandidateNode(
   }
 
   override def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action]) = {
-    val votedReceived_ = votedReceived + msg.nodeId
+    val votedReceived_ = if (msg.granted) votedReceived + msg.nodeId else votedReceived
     val quorumSize     = (nodes.length + 1) / 2
 
     if (msg.term > currentTerm)
@@ -64,13 +62,13 @@ case class CandidateNode(
       val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, 0L)).toMap
       val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, 0))
 
-      (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), actions)
+      (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), AnnounceLeader(nodeId) :: actions)
 
     } else
       (this.copy(votedReceived = votedReceived_), List.empty)
   }
 
-  override def onReceive(logState: LogState, msg: AppendEntries): (NodeState, AppendEntriesResponse) = {
+  override def onReceive(logState: LogState, msg: AppendEntries): (NodeState, (AppendEntriesResponse, List[Action])) = {
 
     val currentTerm_ = if (msg.term > currentTerm) msg.term else currentTerm
 
@@ -81,12 +79,15 @@ case class CandidateNode(
     if (msg.term == currentTerm_ && logOK)
       (
         FollowerNode(nodeId, nodes, currentTerm_, None, Some(msg.leaderId)),
-        AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true)
+        (
+          AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
+          List(AnnounceLeader(msg.leaderId))
+        )
       )
     else
       (
         this.copy(currentTerm = currentTerm_),
-        AppendEntriesResponse(nodeId, currentTerm_, 0, false)
+        (AppendEntriesResponse(nodeId, currentTerm_, 0, false), List.empty)
       )
   }
 
@@ -95,4 +96,6 @@ case class CandidateNode(
 
   override def onReplicateLog(): List[Action] =
     List.empty
+
+  override def leader: Option[String] = None
 }

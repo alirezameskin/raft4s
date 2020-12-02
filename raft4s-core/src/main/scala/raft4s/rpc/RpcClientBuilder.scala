@@ -1,7 +1,7 @@
 package raft4s.rpc
 
-import raft4s.Server
+import raft4s.Address
 
 trait RpcClientBuilder[F[_]] {
-  def build(server: Server): RpcClient[F]
+  def build(address: Address): RpcClient[F]
 }

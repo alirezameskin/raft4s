@@ -12,13 +12,29 @@ lazy val core = (project in file("raft4s-core"))
     )
   )
 
+lazy val grpc = (project in file("raft4s-grpc"))
+  .settings(
+    scalaVersion := "2.13.4",
+    name := "raft4s-grpc",
+    PB.targets in Compile := Seq(
+      scalapb.gen() -> (sourceManaged in Compile).value / "scalapb"
+    ),
+    libraryDependencies ++= Seq(
+      "com.thesamet.scalapb" %% "scalapb-runtime"      % scalapb.compiler.Version.scalapbVersion % "protobuf",
+      "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
+      "io.grpc"               % "grpc-netty"           % scalapb.compiler.Version.grpcJavaVersion
+    )
+  )
+  .dependsOn(core)
+  .aggregate(core)
+
 lazy val demo = (project in file("raft4s-demo"))
   .settings(
     scalaVersion := "2.13.4",
     name := "raft4s-demo"
   )
-  .dependsOn(core)
-  .aggregate(core)
+  .dependsOn(core, grpc)
+  .aggregate(core, grpc)
 
 lazy val root = (project in file("."))
   .aggregate(demo)
