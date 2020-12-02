@@ -1,7 +1,8 @@
-package raft4s.storage
+package raft4s.storage.memory
 
 import cats.Monad
-import raft4s.log.{Log, LogEntry}
+import raft4s.log.Log
+import raft4s.protocol.LogEntry
 
 import scala.collection.concurrent.TrieMap
 

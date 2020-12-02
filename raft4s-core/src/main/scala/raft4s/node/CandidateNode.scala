@@ -1,6 +1,7 @@
 package raft4s.node
 
 import raft4s.log.LogState
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.rpc._
 import raft4s.{Action, ReplicateLog, RequestForVote}
 
@@ -14,16 +15,25 @@ case class CandidateNode(
 ) extends NodeState {
 
   override def onTimer(logState: LogState): (NodeState, List[Action]) = {
-
     val currentTerm_ = currentTerm + 1
     val lastTerm_    = logState.lastTerm.getOrElse(lastTerm)
     val request      = VoteRequest(nodeId, currentTerm_, logState.length, lastTerm_)
     val actions      = nodes.filterNot(_ == nodeId).map(nodeId => RequestForVote(nodeId, request))
+    val quorumSize   = (nodes.length + 1) / 2
 
-    (
-      this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(nodeId), votedReceived = Set(nodeId)),
-      actions
-    )
+    if (1 >= quorumSize) {
+      val ackedLength = nodes.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
+      val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, 0L)).toMap
+      val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, 0))
+
+      (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), actions)
+    } else {
+
+      (
+        this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(nodeId), votedReceived = Set(nodeId)),
+        actions
+      )
+    }
   }
 
   override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse) = {

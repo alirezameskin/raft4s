@@ -1,5 +1,7 @@
 package raft4s.log
 
+import raft4s.protocol.LogEntry
+
 trait Log[F[_]] {
   def length: F[Long]
 

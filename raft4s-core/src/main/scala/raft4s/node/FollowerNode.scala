@@ -2,6 +2,7 @@ package raft4s.node
 
 import raft4s._
 import raft4s.log.LogState
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.rpc._
 
 case class FollowerNode(

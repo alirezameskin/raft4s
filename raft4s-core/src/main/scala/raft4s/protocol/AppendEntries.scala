@@ -1,6 +1,4 @@
-package raft4s.rpc
-
-import raft4s.log.LogEntry
+package raft4s.protocol
 
 case class AppendEntries(
   leaderId: String,

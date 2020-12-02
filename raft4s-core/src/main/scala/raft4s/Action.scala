@@ -1,6 +1,6 @@
 package raft4s
 
-import raft4s.rpc.VoteRequest
+import raft4s.protocol.VoteRequest
 
 sealed trait Action
 

@@ -3,8 +3,8 @@ package raft4s.node
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
 import raft4s.{CommitLogs, ReplicateLog}
-import raft4s.log.{LogEntry, LogState}
-import raft4s.rpc.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse, WriteCommand}
+import raft4s.log.LogState
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
 
 class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
   val nodeId = "node1"

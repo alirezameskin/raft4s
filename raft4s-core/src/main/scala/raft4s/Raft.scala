@@ -1,27 +1,35 @@
 package raft4s
 
-import cats.effect.Concurrent
+import java.util.concurrent.TimeUnit
+
 import cats.effect.concurrent.{Deferred, Ref}
+import cats.effect.{Concurrent, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import raft4s.log.ReplicatedLog
-import raft4s.node.{LeaderNode, NodeState}
+import raft4s.node.{FollowerNode, LeaderNode, NodeState}
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, Command, VoteRequest, VoteResponse}
 import raft4s.rpc._
+import raft4s.storage.Storage
 
-class Raft[F[_]: Monad: Concurrent: Parallel](
+import scala.concurrent.duration.FiniteDuration
+
+class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   val nodeId: String,
-  val members: Map[String, RpcClient[F]],
+  val members: collection.Map[String, RpcClient[F]],
   val log: ReplicatedLog[F],
-  val state: Ref[F, NodeState]
+  val storage: Storage[F],
+  val state: Ref[F, NodeState],
+  val lastHeartbeat: Ref[F, Long]
 )(implicit
   ME: MonadError[F, Throwable]
 ) {
 
   def start(): F[Unit] =
     for {
-      logState <- log.state
-      actions  <- state.modify(_.onTimer(logState))
-      _        <- runActions(actions)
+      _ <- runElection()
+      _ <- scheduleElection()
+      _ <- scheduleReplication()
     } yield ()
 
   def onReceive(msg: VoteRequest): F[VoteResponse] =
@@ -41,6 +49,8 @@ class Raft[F[_]: Monad: Concurrent: Parallel](
     for {
       logState <- log.state
       current  <- state.get
+      time     <- Timer[F].clock.monotonic(TimeUnit.SECONDS)
+      _        <- lastHeartbeat.set(time)
       (nextState, response) = current.onReceive(logState, msg)
       _ <-
         if (response.success)
@@ -67,11 +77,14 @@ class Raft[F[_]: Monad: Concurrent: Parallel](
 
   private def onCommand[T](node: NodeState, command: Command[T], deferred: Deferred[F, T]): F[List[Action]] =
     node match {
-      case LeaderNode(_, _, currentTerm, _, _) =>
-        for {
-          _       <- log.append(currentTerm, command, deferred)
-          actions <- Monad[F].pure(node.onReplicateLog())
-        } yield actions
+      case LeaderNode(_, _, term, _, _) =>
+        if (members.isEmpty)
+          for {
+            _ <- log.append(term, command, deferred)
+            _ <- log.commitLogs(Map.empty, 0)
+          } yield List.empty
+        else
+          for (_ <- log.append(term, command, deferred)) yield node.onReplicateLog()
 
       case _ =>
         ME.raiseError(new RuntimeException("Only leader node can run commands"))
@@ -97,11 +110,54 @@ class Raft[F[_]: Monad: Concurrent: Parallel](
 
       case CommitLogs(ackedLength, minAckes) =>
         log.commitLogs(ackedLength, minAckes)
-
-      case StartElectionTimer =>
-        Monad[F].pure(println("Start election timer"))
-
-      case CancelElectionTimer =>
-        Monad[F].pure(println("Cancel election"))
     }
+
+  private def runElection(): F[Unit] =
+    for {
+      logState <- log.state
+      actions  <- state.modify(_.onTimer(logState))
+      _        <- runActions(actions)
+    } yield ()
+
+  private def scheduleReplication(): F[Unit] = {
+    val scheduled = for {
+      _    <- Timer[F].sleep(FiniteDuration(2000, TimeUnit.MILLISECONDS))
+      node <- state.get
+      actions = if (node.isInstanceOf[LeaderNode]) node.onReplicateLog() else List.empty
+      _ <- runActions(actions)
+    } yield ()
+
+    Concurrent[F].start(Monad[F].foreverM(scheduled)) *> Monad[F].unit
+  }
+
+  private def scheduleElection(): F[Unit] = {
+    val scheduled = for {
+      _    <- Timer[F].sleep(FiniteDuration(5000, TimeUnit.MILLISECONDS))
+      now  <- Timer[F].clock.monotonic(TimeUnit.SECONDS)
+      lh   <- lastHeartbeat.get
+      node <- state.get
+      _    <- if (!node.isInstanceOf[LeaderNode] && now - lh > 5000) runElection() else Monad[F].unit
+    } yield ()
+
+    Concurrent[F].start(Monad[F].foreverM(scheduled)) *> Monad[F].unit
+  }
+}
+
+object Raft {
+  def make[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder](
+    config: Configuration,
+    storage: Storage[F],
+    stateMachine: StateMachine[F]
+  ): F[Raft[F]] =
+    for {
+      persistedState <- storage.retrievePersistedState()
+      nodeId  = config.local.id
+      nodes   = config.local.id :: config.members.map(_.id).toList
+      builder = implicitly[RpcClientBuilder[F]]
+      clients = config.members.map(s => (s.id, builder.build(s))).toMap
+      nodeState <- Ref.of[F, NodeState](FollowerNode(nodeId, nodes, persistedState.term, persistedState.votedFor))
+      heartbeat <- Ref.of[F, Long](0L)
+      replicateLog = ReplicatedLog.build[F](storage.log, stateMachine)
+
+    } yield new Raft[F](nodeId, clients, replicateLog, storage, nodeState, heartbeat)
 }

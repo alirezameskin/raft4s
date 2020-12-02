@@ -1,6 +1,7 @@
 package raft4s.node
 
 import raft4s.log.LogState
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.rpc._
 import raft4s.{Action, CommitLogs, ReplicateLog}
 

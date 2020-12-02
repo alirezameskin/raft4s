@@ -1,100 +1,93 @@
 package raft4s.demo
 
-import java.util.HashMap
+import java.util.concurrent.TimeUnit
 
-import cats.effect.concurrent.Ref
-import cats.effect.{ContextShift, IO}
-import raft4s.log.ReplicatedLog
-import raft4s.node.{FollowerNode, NodeState}
+import cats.effect.{ContextShift, IO, Timer}
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.rpc._
-import raft4s.storage.MemoryLog
-import raft4s.{Raft, StateMachine}
+import raft4s.storage.memory.MemoryStorage
+import raft4s.{Address, Configuration, Raft, Server}
 
-case class Put(key: String, value: String) extends WriteCommand[String]
-case class Get(key: String)                extends ReadCommand[String]
-
-class KvStateMachine extends StateMachine[IO] {
-  private var map             = new HashMap[String, String]()
-  private var lastIndex: Long = 0
-
-  override def applyWrite: PartialFunction[(Long, WriteCommand[_]), IO[Any]] = { case (index, Put(key, value)) =>
-    map.put(key, value)
-    lastIndex = index
-    IO.pure(value)
-  }
-
-  override def applyRead: PartialFunction[ReadCommand[_], IO[Any]] = { case Get(key) =>
-    IO.pure(map.get(key))
-  }
-}
+import scala.concurrent.duration.FiniteDuration
 
 object RaftTest extends App {
 
   implicit val contextShift: ContextShift[IO] = IO.contextShift(scala.concurrent.ExecutionContext.global)
+  implicit val timer: Timer[IO]               = IO.timer(scala.concurrent.ExecutionContext.global)
 
-  val log2          = MemoryLog.empty[IO]
-  val stateMachine2 = new KvStateMachine()
-  val rlog2         = new ReplicatedLog(log2, stateMachine2)
-  val raftNode2 =
-    new Raft("node2", Map.empty, rlog2, Ref.of[IO, NodeState](FollowerNode("node2", nodes, 0, None, None)).unsafeRunSync())
-  val raft2Client = new RpcClient[IO] {
-    override def send(voteRequest: VoteRequest): IO[VoteResponse] =
-      IO(println(s"vote request received ${voteRequest} on node 2")) *> raftNode2.onReceive(voteRequest)
+  val clients = scala.collection.mutable.Map.empty[String, RpcClient[IO]]
 
-    override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
-      IO(println(s"Append entries request received ${appendEntries} on node 2")) *> raftNode2.onReceive(appendEntries)
+  implicit val clientBuilder = new RpcClientBuilder[IO] {
+    override def build(server: Server): RpcClient[IO] = new RpcClient[IO] {
+      override def send(voteRequest: VoteRequest): IO[VoteResponse] = clients(server.id).send(voteRequest)
+
+      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] = clients(server.id).send(appendEntries)
+    }
   }
 
-  val log3          = MemoryLog.empty[IO]
-  val stateMachine3 = new KvStateMachine()
-  val rlog3         = new ReplicatedLog(log3, stateMachine3)
-  val raftNode3 =
-    new Raft("node3", Map.empty, rlog3, Ref.of[IO, NodeState](FollowerNode("node3", nodes, 0, None, None)).unsafeRunSync())
-  val raft3Client = new RpcClient[IO] {
-    override def send(voteRequest: VoteRequest): IO[VoteResponse] =
-      IO(println(s"vote request received ${voteRequest} on node 3")) *> raftNode3.onReceive(voteRequest)
+  val nodes = List("node1", "node2", "node3")
+  val node1 = createNode("node1", nodes)
+  val node2 = createNode("node2", nodes)
+  val node3 = createNode("node3", nodes)
 
-    override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
-      IO(println(s"Append entries request received ${appendEntries} on node 3")) *> raftNode3.onReceive(appendEntries)
-  }
+  val client1 = createClient(node1)
+  val client2 = createClient(node2)
+  val client3 = createClient(node3)
 
-  val nodes         = List("node1", "node2", "node3")
-  val members       = Map("node2" -> raft2Client, "node3" -> raft3Client)
-  val leaderLog     = MemoryLog.empty[IO]
-  val stateMachine1 = new KvStateMachine()
-  val rLeaderLog    = new ReplicatedLog(leaderLog, stateMachine1)
+  clients.put("node1", client1)
+  clients.put("node2", client2)
+  clients.put("node3", client3)
+
   val result = for {
-    state <- Ref.of[IO, NodeState](FollowerNode("node1", nodes, 0, None, None))
-    raft = new Raft("node1", members, rLeaderLog, state)
-    _ <- raft.start()
-    s <- raft.state.get
+    _ <- node2.start()
+    _ <- node3.start()
+    _ <- node1.start()
+
+    s <- node1.state.get
     _ = println("Node 1", s)
     _ = println("Sending a new command")
-    res <- raft.onCommand(Put("name", "Reza"))
+
+    res <- node1.onCommand(Put("name", "Reza"))
     _ = println(s"Command output : ${res}")
 
-    res <- raft.onCommand(Put("lastname", "Meskin"))
+    _ <- Timer[IO].sleep(FiniteDuration(20, TimeUnit.SECONDS))
+
+    res <- node1.onCommand(Put("lastname", "Meskin"))
     _ = println(s"Command output : ${res}")
 
-    res <- raft.onCommand(Get("name"))
+    res <- node1.onCommand(Get("name"))
     _ = println(s"Command output : ${res}")
 
-    res <- raft.onCommand(Put("name", "Alireza"))
+    res <- node1.onCommand(Put("name", "Alireza"))
     _ = println(s"Command output : ${res}")
 
-    res <- raft.onCommand(Get("name"))
+    res <- node1.onCommand(Get("name"))
     _ = println(s"Command output : ${res}")
   } yield ()
 
   result.unsafeRunSync()
 
-  println(log2.map)
-  println(log3.map)
+  scala.Predef.ensuring(node2.log.stateMachine.applyRead(Get("name")).unsafeRunSync() == "Alireza")
+  scala.Predef.ensuring(node3.log.stateMachine.applyRead(Get("name")).unsafeRunSync() == "Alireza")
 
-  scala.Predef.ensuring(stateMachine2.applyRead(Get("name")).unsafeRunSync() == "Alireza")
-  scala.Predef.ensuring(stateMachine3.applyRead(Get("name")).unsafeRunSync() == "Alireza")
+  scala.Predef.ensuring(node2.log.stateMachine.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
+  scala.Predef.ensuring(node2.log.stateMachine.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
 
-  scala.Predef.ensuring(stateMachine2.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
-  scala.Predef.ensuring(stateMachine3.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
+  def createNode(nodeId: String, nodes: List[String]): Raft[IO] = {
+    val configuration = Configuration(
+      local = Server(nodeId, Address("localhost", 8090)),
+      members = nodes.filterNot(_ == nodeId).map(id => Server(id, Address("localhost", 8090)))
+    )
+    val node = Raft.make[IO](configuration, MemoryStorage.empty[IO], new KvStateMachine())
+    node.unsafeRunSync()
+  }
 
+  def createClient(node: Raft[IO]): RpcClient[IO] =
+    new RpcClient[IO] {
+      override def send(voteRequest: VoteRequest): IO[VoteResponse] =
+        IO(println(s"vote request received ${voteRequest} on node ${node.nodeId}")) *> node.onReceive(voteRequest)
+
+      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
+        IO(println(s"Append entries request received ${appendEntries} on node ${node.nodeId}")) *> node.onReceive(appendEntries)
+    }
 }

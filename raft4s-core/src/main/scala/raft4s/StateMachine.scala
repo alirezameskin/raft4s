@@ -1,6 +1,6 @@
 package raft4s
 
-import raft4s.rpc.{ReadCommand, WriteCommand}
+import raft4s.protocol.{ReadCommand, WriteCommand}
 
 trait StateMachine[F[_]] {
   def applyWrite: PartialFunction[(Long, WriteCommand[_]), F[Any]]

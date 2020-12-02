@@ -3,7 +3,8 @@ package raft4s.node
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
 import raft4s.RequestForVote
-import raft4s.log.{LogEntry, LogState}
+import raft4s.log.LogState
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
 import raft4s.rpc._
 
 class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {

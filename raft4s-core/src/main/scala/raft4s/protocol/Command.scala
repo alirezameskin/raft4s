@@ -1,4 +1,4 @@
-package raft4s.rpc
+package raft4s.protocol
 
 sealed trait Command[OUT]
 trait ReadCommand[OUT]  extends Command[OUT]

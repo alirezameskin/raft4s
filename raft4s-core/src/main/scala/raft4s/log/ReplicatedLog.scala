@@ -4,11 +4,11 @@ import cats.Monad
 import cats.implicits._
 import cats.effect.concurrent.Deferred
 import raft4s.StateMachine
-import raft4s.rpc.{AppendEntries, Command, ReadCommand, WriteCommand}
+import raft4s.protocol.{AppendEntries, Command, LogEntry, ReadCommand, WriteCommand}
 
 import scala.collection.concurrent.TrieMap
 
-class ReplicatedLog[F[_]: Monad](log: Log[F], stateMachine: StateMachine[F]) {
+class ReplicatedLog[F[_]: Monad](val log: Log[F], val stateMachine: StateMachine[F]) {
 
   private val deferreds = TrieMap[Long, Deferred[F, Any]]()
 
@@ -17,7 +17,7 @@ class ReplicatedLog[F[_]: Monad](log: Log[F], stateMachine: StateMachine[F]) {
       length       <- log.length
       commitLength <- log.commitLength
       entries      <- (sentLength until length).toList.traverse(i => log.get(i))
-      prevLogTerm = if (sentLength > 0 && entries.nonEmpty) entries.last.term else 0
+      prevLogTerm  <- if (sentLength > 0) log.get(sentLength - 1).map(_.term) else Monad[F].pure(0L)
     } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, commitLength, entries)
 
   def state: F[LogState] =
@@ -54,13 +54,13 @@ class ReplicatedLog[F[_]: Monad](log: Log[F], stateMachine: StateMachine[F]) {
   }
 
   private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): F[Unit] =
-    if (entries.nonEmpty && logLength > leaderLogLength)
+    if (entries.nonEmpty && logLength > leaderLogLength) {
       log.get(logLength).flatMap { entry =>
-        if (entry.term != entries.head.term) {
+        if (entry != null && entry.term != entries.head.term) {
           (leaderLogLength until logLength).toList.traverse(log.delete) *> Monad[F].unit
         } else Monad[F].unit
       }
-    else Monad[F].unit
+    } else Monad[F].unit
 
   private def putEntries(entries: List[LogEntry], logLength: Long, leaderLogLength: Long): F[Unit] = {
     val logEntries = if (leaderLogLength + entries.size > logLength) {
@@ -89,10 +89,15 @@ class ReplicatedLog[F[_]: Monad](log: Log[F], stateMachine: StateMachine[F]) {
 
     output.flatMap { result =>
       deferreds.get(index) match {
-        case Some(deferred) => deferred.complete(result)
+        case Some(deferred) => deferred.complete(result) *> Monad[F].pure(deferreds.remove(index))
         case None           => Monad[F].unit
       }
     }
   }
 
+}
+
+object ReplicatedLog {
+  def build[F[_]: Monad](log: Log[F], stateMachine: StateMachine[F]): ReplicatedLog[F] =
+    new ReplicatedLog(log, stateMachine)
 }
