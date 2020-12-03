@@ -3,7 +3,7 @@ package raft4s.demo
 import java.util.concurrent.TimeUnit
 
 import cats.effect.{ContextShift, IO, Timer}
-import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
+import raft4s.protocol.{AppendEntries, AppendEntriesResponse, Command, VoteRequest, VoteResponse, WriteCommand}
 import raft4s.rpc._
 import raft4s.storage.memory.MemoryStorage
 import raft4s.{Address, Configuration, Raft}
@@ -22,6 +22,8 @@ object RaftTest extends App {
       override def send(voteRequest: VoteRequest): IO[VoteResponse] = clients(address.id).send(voteRequest)
 
       override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] = clients(address.id).send(appendEntries)
+
+      override def send[T](command: Command[T]): IO[T] = clients(address.id).send(command)
     }
   }
 
@@ -40,19 +42,18 @@ object RaftTest extends App {
   val client2 = createClient(node2)
   val client3 = createClient(node3)
 
-  clients.put("node1", client1)
-  clients.put("node2", client2)
-  clients.put("node3", client3)
+  clients.put("node1:8090", client1)
+  clients.put("node2:8090", client2)
+  clients.put("node3:8090", client3)
 
   val result = for {
-    _ <- node2.start()
-    _ <- node3.start()
-    _ <- node1.start()
+    _      <- node2.start()
+    _      <- node3.start()
+    leader <- node1.start()
 
-    s <- node1.state.get
-    _ = println("Node 1", s)
+    _ = println("Leader is : " + leader)
+
     _ = println("Sending a new command")
-
     res <- node1.onCommand(Put("name", "Reza"))
     _ = println(s"Command output : ${res}")
 
@@ -69,6 +70,9 @@ object RaftTest extends App {
 
     res <- node1.onCommand(Get("name"))
     _ = println(s"Command output : ${res}")
+
+    _ <- Timer[IO].sleep(FiniteDuration(2, TimeUnit.SECONDS))
+
   } yield ()
 
   result.unsafeRunSync()
@@ -85,6 +89,7 @@ object RaftTest extends App {
       members = nodes.filterNot(_ == nodeId).map(id => Address(id, 8090)),
       FiniteDuration(0, TimeUnit.SECONDS)
     )
+
     val node = Raft.make[IO](configuration, MemoryStorage.empty[IO], new KvStateMachine())
     node.unsafeRunSync()
   }
@@ -98,5 +103,8 @@ object RaftTest extends App {
         IO(println(s"Append entries request received ${appendEntries} on node ${node.config.local.id}")) *> node.onReceive(
           appendEntries
         )
+
+      override def send[T](command: Command[T]): IO[T] =
+        IO(println(s"Sending a command to node ${node.config.local.id}")) *> node.onCommand(command)
     }
 }

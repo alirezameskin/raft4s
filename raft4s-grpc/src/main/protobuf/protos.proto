@@ -5,6 +5,15 @@ package raft4s.grpc;
 service Raft {
   rpc vote(VoteRequest) returns (VoteResponse) {}
   rpc appendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
+  rpc execute(CommandRequest) returns (CommandResponse) {}
+}
+
+message CommandRequest {
+  bytes command = 1;
+}
+
+message CommandResponse {
+  bytes outpue = 1;
 }
 
 message VoteRequest {

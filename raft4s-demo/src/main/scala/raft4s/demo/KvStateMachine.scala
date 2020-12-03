@@ -14,9 +14,11 @@ class KvStateMachine extends StateMachine[IO] {
   private var lastIndex: Long = 0
 
   override def applyWrite: PartialFunction[(Long, WriteCommand[_]), IO[Any]] = { case (index, Put(key, value)) =>
-    map.put(key, value)
-    lastIndex = index
-    IO.pure(value)
+    IO {
+      map.put(key, value)
+      lastIndex = index
+      value
+    }
   }
 
   override def applyRead: PartialFunction[ReadCommand[_], IO[Any]] = { case Get(key) =>

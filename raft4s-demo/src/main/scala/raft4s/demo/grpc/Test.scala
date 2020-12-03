@@ -25,10 +25,10 @@ object Test extends IOApp {
       _    <- node.start()
 
       s <- node.state.get
-      _ = println("Node 1", s)
+      _ = println("Node 1 : ", s)
 
       res <- node.onCommand(Get("name"))
-      _ = println(s"Result in node 1 ${res}")
+      _ = println(s"Result in node 1 : ${res}")
     } yield ()
 
     val config2 =

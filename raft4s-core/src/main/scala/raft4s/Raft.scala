@@ -1,7 +1,5 @@
 package raft4s
 
-import java.util.concurrent.TimeUnit
-
 import cats.effect.concurrent.{Deferred, Ref}
 import cats.effect.{Concurrent, Timer}
 import cats.implicits._
@@ -12,8 +10,8 @@ import raft4s.protocol._
 import raft4s.rpc._
 import raft4s.storage.Storage
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Random
 
 class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
   val config: Configuration,
@@ -108,7 +106,12 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
           for (_ <- log.append(term, command, deferred)) yield node.onReplicateLog()
 
       case _ =>
-        ME.raiseError(new RuntimeException("Only leader node can run commands"))
+        for {
+          leader   <- leaderAnnouncer.listen()
+          client   <- clientProvider.client(leader)
+          response <- client.send(command)
+          _        <- deferred.complete(response)
+        } yield List.empty
     }
 
   private def runActions(actions: List[Action]): F[Unit] =
