@@ -24,7 +24,7 @@ object RaftTestSingleNode extends App {
     })
   }
 
-  val config = Configuration(Address("node1", 8090), List.empty, FiniteDuration(0, TimeUnit.SECONDS))
+  val config = Configuration(Address("node1", 8090), List.empty)
 
   val result = for {
     node <- Raft.make[IO](config, MemoryStorage.empty[IO], new KvStateMachine())

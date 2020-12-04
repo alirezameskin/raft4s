@@ -1,13 +1,17 @@
 package raft4s
 
-import scala.concurrent.duration.FiniteDuration
-
 case class Address(host: String, port: Int) {
   override def toString: String = id
   def id: String                = s"${host}:${port}"
 }
 
-case class Configuration(local: Address, members: Seq[Address], startElectionTimeout: FiniteDuration) {
+case class Configuration(
+  local: Address,
+  members: Seq[Address] = List.empty,
+  followerAcceptRead: Boolean = true,
+  electionMinDelayMillis: Int = 150,
+  electionMaxDelayMillis: Int = 300
+) {
   def nodeId: String      = local.toString
   def nodes: List[String] = local.toString :: members.map(_.toString).toList
 }

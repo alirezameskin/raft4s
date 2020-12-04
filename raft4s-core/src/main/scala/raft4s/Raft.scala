@@ -1,7 +1,7 @@
 package raft4s
 
 import cats.effect.concurrent.{Deferred, Ref}
-import cats.effect.{Concurrent, Timer}
+import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import raft4s.log.ReplicatedLog
@@ -27,7 +27,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
     for {
       server <- RpcServerBuilder[F].build(config.local, this)
       _      <- server.start()
-      _      <- Timer[F].sleep(config.startElectionTimeout)
+      delay  <- electionDelay()
+      _      <- Timer[F].sleep(delay)
       node   <- state.get
       _      <- if (node.leader.isDefined) Monad[F].unit else runElection()
       _      <- scheduleElection()
@@ -77,7 +78,10 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
   def onCommand[T](command: Command[T]): F[T] =
     command match {
       case command: ReadCommand[_] =>
-        onReadCommand(command)
+        for {
+          state_ <- state.get
+          result <- onReadCommand(state_, command)
+        } yield result
 
       case command: WriteCommand[_] =>
         for {
@@ -89,10 +93,25 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
         } yield result
     }
 
-  private def onReadCommand[T](command: ReadCommand[T]): F[T] =
-    if (log.stateMachine.applyRead.isDefinedAt(command))
-      log.stateMachine.applyRead(command).asInstanceOf[F[T]]
-    else ME.raiseError(new RuntimeException("Can not run the command"))
+  private def onReadCommand[T](node: NodeState, command: ReadCommand[T]): F[T] =
+    node match {
+      case _: LeaderNode =>
+        if (log.stateMachine.applyRead.isDefinedAt(command))
+          log.stateMachine.applyRead(command).asInstanceOf[F[T]]
+        else ME.raiseError(new RuntimeException("Can not run the command"))
+
+      case _: FollowerNode if config.followerAcceptRead =>
+        if (log.stateMachine.applyRead.isDefinedAt(command))
+          log.stateMachine.applyRead(command).asInstanceOf[F[T]]
+        else ME.raiseError(new RuntimeException("Can not run the command"))
+
+      case _ =>
+        for {
+          leader   <- leaderAnnouncer.listen()
+          client   <- clientProvider.client(leader)
+          response <- client.send(command)
+        } yield response
+    }
 
   private def onWriteCommand[T](node: NodeState, command: WriteCommand[T], deferred: Deferred[F, T]): F[List[Action]] =
     node match {
@@ -172,6 +191,13 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
     } yield ()
 
     Concurrent[F].start(Monad[F].foreverM(scheduled)) *> Monad[F].unit
+  }
+
+  private def electionDelay(): F[FiniteDuration] = Sync[F].delay {
+    val delay =
+      config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis)
+
+    FiniteDuration(delay, TimeUnit.MILLISECONDS)
   }
 }
 

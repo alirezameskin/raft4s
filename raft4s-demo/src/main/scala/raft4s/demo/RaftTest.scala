@@ -86,8 +86,8 @@ object RaftTest extends App {
   def createNode(nodeId: String, nodes: List[String]): Raft[IO] = {
     val configuration = Configuration(
       local = Address(nodeId, 8090),
-      members = nodes.filterNot(_ == nodeId).map(id => Address(id, 8090)),
-      FiniteDuration(0, TimeUnit.SECONDS)
+      members = nodes.map(id => Address(id, 8090)),
+      followerAcceptRead = false
     )
 
     val node = Raft.make[IO](configuration, MemoryStorage.empty[IO], new KvStateMachine())

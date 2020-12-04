@@ -1,21 +1,16 @@
 package raft4s.demo.grpc
 
-import java.util.concurrent.TimeUnit
-
 import cats.effect.{ExitCode, IO, IOApp}
 import raft4s.demo.{Get, KvStateMachine, Put}
 import raft4s.storage.memory.MemoryStorage
 import raft4s.{Address, Configuration, Raft}
-
-import scala.concurrent.duration.FiniteDuration
 
 object Test extends IOApp {
   override def run(args: List[String]): IO[ExitCode] = {
     val config1 =
       Configuration(
         Address("localhost", 9080),
-        List(Address("localhost", 9081), Address("localhost", 9082)),
-        FiniteDuration(10, TimeUnit.SECONDS)
+        List(Address("localhost", 9081), Address("localhost", 9082))
       )
 
     import raft4s.rpc.grpc.io.implicits._
@@ -34,8 +29,7 @@ object Test extends IOApp {
     val config2 =
       Configuration(
         Address("localhost", 9081),
-        List(Address("localhost", 9080), Address("localhost", 9082)),
-        FiniteDuration(0, TimeUnit.SECONDS)
+        List(Address("localhost", 9080), Address("localhost", 9082))
       )
     val result2 = for {
       node <- Raft.make[IO](config2, MemoryStorage.empty[IO], new KvStateMachine())
@@ -51,8 +45,7 @@ object Test extends IOApp {
     val config3 =
       Configuration(
         Address("localhost", 9082),
-        List(Address("localhost", 9080), Address("localhost", 9081)),
-        FiniteDuration(5, TimeUnit.SECONDS)
+        List(Address("localhost", 9080), Address("localhost", 9081))
       )
     val result3 = for {
       node <- Raft.make[IO](config3, MemoryStorage.empty[IO], new KvStateMachine())
