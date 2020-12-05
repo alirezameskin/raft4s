@@ -9,7 +9,10 @@ lazy val core = (project in file("raft4s-core"))
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % "2.2.0",
       "org.scalatest" %% "scalatest"   % "3.2.0" % Test
-    )
+    ),
+    githubOwner := "alirezameskin",
+    githubRepository := "raft4s",
+    githubTokenSource := TokenSource.Or(TokenSource.Environment("GITHUB_TOKEN"), TokenSource.GitConfig("github.token"))
   )
 
 lazy val grpc = (project in file("raft4s-grpc"))
@@ -21,8 +24,12 @@ lazy val grpc = (project in file("raft4s-grpc"))
     libraryDependencies ++= Seq(
       "com.thesamet.scalapb" %% "scalapb-runtime"      % scalapb.compiler.Version.scalapbVersion % "protobuf",
       "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
-      "io.grpc"               % "grpc-netty"           % scalapb.compiler.Version.grpcJavaVersion
-    )
+      "io.grpc"               % "grpc-netty"           % scalapb.compiler.Version.grpcJavaVersion,
+      "io.grpc"               % "grpc-services"        % scalapb.compiler.Version.grpcJavaVersion
+    ),
+    githubOwner := "alirezameskin",
+    githubRepository := "raft4s",
+    githubTokenSource := TokenSource.Or(TokenSource.Environment("GITHUB_TOKEN"), TokenSource.GitConfig("github.token"))
   )
   .dependsOn(core)
   .aggregate(core)
