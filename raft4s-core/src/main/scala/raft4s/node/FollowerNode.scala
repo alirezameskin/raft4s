@@ -14,6 +14,7 @@ case class FollowerNode(
 
   override def onTimer(logState: LogState): (NodeState, List[Action]) = {
     val (state, actions) = CandidateNode(nodeId, nodes, currentTerm, logState.lastTerm.getOrElse(0L)).onTimer(logState)
+
     if (state.isInstanceOf[LeaderNode])
       (state, actions)
     else if (this.currentLeader.isDefined)
@@ -51,7 +52,12 @@ case class FollowerNode(
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
         (
           AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
-          if (currentLeader.contains(msg.leaderId)) List.empty else List(AnnounceLeader(msg.leaderId))
+          if (currentLeader.isEmpty)
+            List(AnnounceLeader(msg.leaderId))
+          else if (currentLeader.contains(msg.leaderId))
+            List.empty
+          else
+            List(AnnounceLeader(msg.leaderId, true))
         )
       )
     else

@@ -52,7 +52,10 @@ case class LeaderNode(
         val sentLength_  = sentLength + (msg.nodeId  -> msg.ack)
         val ackedLength_ = ackedLength + (msg.nodeId -> msg.ack)
 
-        (this.copy(ackedLength = ackedLength_, sentLength = sentLength_), List(CommitLogs(ackedLength_, (nodes.size + 1) / 2)))
+        (
+          this.copy(ackedLength = ackedLength_, sentLength = sentLength_),
+          List(CommitLogs(ackedLength_ + (nodeId -> logState.length), (nodes.size + 1) / 2))
+        )
 
       } else if (sentLength(msg.nodeId) > 0) {
         val sentLength_ = sentLength + (msg.nodeId -> (sentLength(msg.nodeId) - 1))

@@ -10,7 +10,9 @@ case class Configuration(
   members: Seq[Address] = List.empty,
   followerAcceptRead: Boolean = true,
   electionMinDelayMillis: Int = 150,
-  electionMaxDelayMillis: Int = 300
+  electionMaxDelayMillis: Int = 300,
+  heartbeatIntervalMillis: Int = 2000,
+  heartbeatTimeoutMillis: Int = 6000
 ) {
   def nodeId: String      = local.toString
   def nodes: List[String] = local.toString :: members.map(_.toString).toList

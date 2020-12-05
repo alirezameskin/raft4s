@@ -56,7 +56,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
     for {
       logState <- log.state
       current  <- state.get
-      time     <- Timer[F].clock.monotonic(TimeUnit.SECONDS)
+      time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
       _        <- lastHeartbeat.set(time)
       (nextState, (response, actions)) = current.onReceive(logState, msg)
 
@@ -156,7 +156,10 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       case CommitLogs(ackedLength, minAckes) =>
         log.commitLogs(ackedLength, minAckes)
 
-      case AnnounceLeader(leaderId) =>
+      case AnnounceLeader(leaderId, true) =>
+        leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
+
+      case AnnounceLeader(leaderId, false) =>
         leaderAnnouncer.announce(leaderId)
 
       case ResetLeaderAnnouncer =>
@@ -172,7 +175,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   private def scheduleReplication(): F[Unit] = {
     val scheduled = for {
-      _    <- Timer[F].sleep(FiniteDuration(2000, TimeUnit.MILLISECONDS))
+      _    <- Timer[F].sleep(FiniteDuration(config.heartbeatIntervalMillis, TimeUnit.MILLISECONDS))
       node <- state.get
       actions = if (node.isInstanceOf[LeaderNode]) node.onReplicateLog() else List.empty
       _ <- runActions(actions)
@@ -183,11 +186,11 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   private def scheduleElection(): F[Unit] = {
     val scheduled = for {
-      _    <- Timer[F].sleep(FiniteDuration(5000, TimeUnit.MILLISECONDS))
-      now  <- Timer[F].clock.monotonic(TimeUnit.SECONDS)
+      _    <- Timer[F].sleep(FiniteDuration(config.heartbeatTimeoutMillis, TimeUnit.MILLISECONDS))
+      now  <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
       lh   <- lastHeartbeat.get
       node <- state.get
-      _    <- if (!node.isInstanceOf[LeaderNode] && now - lh > 5000) runElection() else Monad[F].unit
+      _    <- if (!node.isInstanceOf[LeaderNode] && now - lh > 5) runElection() else Monad[F].unit
     } yield ()
 
     Concurrent[F].start(Monad[F].foreverM(scheduled)) *> Monad[F].unit

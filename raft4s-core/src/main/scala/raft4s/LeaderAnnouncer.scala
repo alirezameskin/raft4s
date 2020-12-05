@@ -17,8 +17,7 @@ class LeaderAnnouncer[F[_]: Monad: Concurrent](
   def reset(): F[Unit] =
     for {
       newDeferred <- Deferred[F, String]
-      oldDeferred <- announcer.getAndSet(newDeferred)
-      _           <- oldDeferred.complete("OLD LEADER")
+      _           <- announcer.set(newDeferred)
     } yield ()
 
   def listen(): F[String] =

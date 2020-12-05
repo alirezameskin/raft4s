@@ -1,10 +1,10 @@
-name := "raft4s"
-version := "0.1"
-scalaVersion := "2.13.4"
+Global / version := "0.0.1"
+Global / organization := "com.github.alirezameskin"
+Global / homepage := Some(url("https://github.com/alirezameskin/raft4s"))
+Global / scalaVersion := "2.13.4"
 
 lazy val core = (project in file("raft4s-core"))
   .settings(
-    scalaVersion := "2.13.4",
     name := "raft4s-core",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % "2.2.0",
@@ -14,7 +14,6 @@ lazy val core = (project in file("raft4s-core"))
 
 lazy val grpc = (project in file("raft4s-grpc"))
   .settings(
-    scalaVersion := "2.13.4",
     name := "raft4s-grpc",
     PB.targets in Compile := Seq(
       scalapb.gen() -> (sourceManaged in Compile).value / "scalapb"
@@ -30,8 +29,10 @@ lazy val grpc = (project in file("raft4s-grpc"))
 
 lazy val demo = (project in file("raft4s-demo"))
   .settings(
+    name := "raft4s-demo",
     scalaVersion := "2.13.4",
-    name := "raft4s-demo"
+    publish := {},
+    publishLocal := {}
   )
   .dependsOn(core, grpc)
   .aggregate(core, grpc)
@@ -39,6 +40,7 @@ lazy val demo = (project in file("raft4s-demo"))
 lazy val root = (project in file("."))
   .aggregate(demo)
   .settings(
-    scalaVersion := "2.13.4",
-    moduleName := "raft4s"
+    moduleName := "raft4s",
+    publish := {},
+    publishLocal := {}
   )
