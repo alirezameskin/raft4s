@@ -1,27 +1,32 @@
-Global / version := "0.0.2"
-Global / organization := "com.github.alirezameskin"
-Global / homepage := Some(url("https://github.com/alirezameskin/raft4s"))
-Global / scalaVersion := "2.13.4"
+lazy val Version           = "0.0.2"
+lazy val ScalaVersion      = "2.13.4"
+lazy val CatsEffectVersion = "2.3.0"
+lazy val OdinVersion       = "0.9.1"
+lazy val ScalaTestVersion  = "3.2.0"
 
-val PublishSettingsGroup: Seq[Setting[_]] = Seq(
+val GlobalSettingsGroup: Seq[Setting[_]] = Seq(
+  version := Version,
+  scalaVersion := ScalaVersion,
+  homepage := Some(url("https://github.com/alirezameskin/raft4s")),
+  organization := "com.github.alirezameskin",
   githubOwner := "alirezameskin",
   githubRepository := "raft4s",
   githubTokenSource := TokenSource.Or(TokenSource.Environment("GITHUB_TOKEN"), TokenSource.GitConfig("github.token"))
 )
 
 lazy val core = (project in file("raft4s-core"))
-  .settings(PublishSettingsGroup)
+  .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s-core",
     libraryDependencies ++= Seq(
-      "org.typelevel"        %% "cats-effect" % "2.2.0",
-      "com.github.valskalla" %% "odin-core"   % "0.9.1",
-      "org.scalatest"        %% "scalatest"   % "3.2.0" % Test
+      "org.typelevel"        %% "cats-effect" % CatsEffectVersion,
+      "com.github.valskalla" %% "odin-core"   % OdinVersion,
+      "org.scalatest"        %% "scalatest"   % ScalaTestVersion % Test
     )
   )
 
 lazy val grpc = (project in file("raft4s-grpc"))
-  .settings(PublishSettingsGroup)
+  .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s-grpc",
     PB.targets in Compile := Seq(
@@ -38,9 +43,9 @@ lazy val grpc = (project in file("raft4s-grpc"))
   .aggregate(core)
 
 lazy val demo = (project in file("raft4s-demo"))
+  .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s-demo",
-    scalaVersion := "2.13.4",
     publish := {},
     publishLocal := {}
   )
@@ -49,6 +54,7 @@ lazy val demo = (project in file("raft4s-demo"))
 
 lazy val root = (project in file("."))
   .aggregate(demo)
+  .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s",
     moduleName := "raft4s",
