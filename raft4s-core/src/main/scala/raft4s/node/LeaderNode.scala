@@ -16,7 +16,7 @@ case class LeaderNode(
     (this, List.empty)
 
   override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse) = {
-    val lastTerm = logState.lastTerm.getOrElse(0L)
+    val lastTerm = logState.lastTerm.getOrElse(currentTerm)
     val logOK    = (msg.logTerm > lastTerm) || (msg.logTerm == lastTerm && msg.logLength >= logState.length)
     val termOK   = msg.currentTerm >= currentTerm
 

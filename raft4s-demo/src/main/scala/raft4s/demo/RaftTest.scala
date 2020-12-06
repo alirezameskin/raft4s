@@ -1,8 +1,9 @@
 package raft4s.demo
 
 import java.util.concurrent.TimeUnit
-
 import cats.effect.{ContextShift, IO, Timer}
+import io.odin
+import io.odin.Logger
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, Command, VoteRequest, VoteResponse, WriteCommand}
 import raft4s.rpc._
 import raft4s.storage.memory.MemoryStorage
@@ -12,6 +13,7 @@ import scala.concurrent.duration.FiniteDuration
 
 object RaftTest extends App {
 
+  implicit val logger: Logger[IO]             = odin.consoleLogger()
   implicit val contextShift: ContextShift[IO] = IO.contextShift(scala.concurrent.ExecutionContext.global)
   implicit val timer: Timer[IO]               = IO.timer(scala.concurrent.ExecutionContext.global)
 

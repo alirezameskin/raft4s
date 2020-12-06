@@ -1,11 +1,15 @@
 package raft4s.demo.grpc
 
 import cats.effect.{ExitCode, IO, IOApp}
+import io.odin
+import io.odin.Logger
 import raft4s.demo.{Get, KvStateMachine, Put}
 import raft4s.storage.memory.MemoryStorage
 import raft4s.{Address, Configuration, Raft}
 
 object Test extends IOApp {
+  implicit val logger: Logger[IO] = odin.consoleLogger()
+
   override def run(args: List[String]): IO[ExitCode] = {
     val config1 =
       Configuration(
