@@ -2,7 +2,7 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
-import raft4s.{AnnounceLeader, CommitLogs, ReplicateLog}
+import raft4s.{AnnounceLeader, CommitLogs, ReplicateLog, StoreState}
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
 
@@ -28,7 +28,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    node.onReceive(logState, VoteRequest("node3", 9, 100, 9)) shouldBe (node, VoteResponse("node1", 9, false))
+    node.onReceive(logState, VoteRequest("node3", 9, 100, 9)) shouldBe (node, (VoteResponse("node1", 9, false), List.empty))
   }
 
   it should "turn to a Follower node when it gets an Vote with higher Term" in {
@@ -36,7 +36,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val logState = LogState(100, Some(10))
 
     val expectedNode     = FollowerNode(nodeId, nodes, 12, Some("node3"))
-    val expectedResponse = VoteResponse(nodeId, 12, true)
+    val expectedResponse = (VoteResponse(nodeId, 12, true), List(StoreState))
 
     node.onReceive(logState, VoteRequest("node3", 12, 100, 10)) shouldBe (expectedNode, expectedResponse)
   }
@@ -60,7 +60,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
 
     node.onReceive(logState, request) shouldBe (expectedNode, (
       AppendEntriesResponse(nodeId, 11, 101, true),
-      List(AnnounceLeader("node2"))
+      List(StoreState, AnnounceLeader("node2"))
     ))
   }
 
@@ -72,7 +72,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedNode = FollowerNode(nodeId, nodes, 11)
     val request      = AppendEntriesResponse("node2", 11, 1, true)
 
-    node.onReceive(logState, request) shouldBe (expectedNode, List.empty)
+    node.onReceive(logState, request) shouldBe (expectedNode, List(StoreState))
   }
 
   it should "commit logs when it gets a success response for AppendEntries" in {

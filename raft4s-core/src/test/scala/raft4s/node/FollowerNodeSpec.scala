@@ -2,7 +2,7 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
-import raft4s.{AnnounceLeader, RequestForVote}
+import raft4s.{AnnounceLeader, RequestForVote, StoreState}
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, LogEntry, VoteRequest, VoteResponse, WriteCommand}
 
@@ -36,7 +36,7 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
     val voteRequest     = VoteRequest("node1", 11, 100, 10)
     val voteRequests    = List(RequestForVote("node2", voteRequest), RequestForVote("node3", voteRequest))
     val expectedState   = CandidateNode(nodeId, nodes, 11, 10, Some("node1"), Set("node1"))
-    val expectedActions = voteRequests
+    val expectedActions = StoreState :: voteRequests
 
     val logState = LogState(100, Some(10))
 
@@ -47,7 +47,7 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
     val node     = FollowerNode(nodeId, nodes, 10)
     val logState = LogState(100, Some(10))
 
-    node.onReceive(logState, VoteRequest("node2", 9, 100, 9)) shouldBe (node, VoteResponse("node1", 10, false))
+    node.onReceive(logState, VoteRequest("node2", 9, 100, 9)) shouldBe (node, (VoteResponse("node1", 10, false), List.empty))
   }
 
   it should "accept a VoteRequest with higher Term and change its VotedFor and CurrentTerm" in {
@@ -56,7 +56,10 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
 
     val expectedNode = FollowerNode(nodeId, nodes, 11, Some("node2"), None)
 
-    node.onReceive(logState, VoteRequest("node2", 11, 100, 10)) shouldBe (expectedNode, VoteResponse("node1", 11, true))
+    node.onReceive(logState, VoteRequest("node2", 11, 100, 10)) shouldBe (expectedNode, (
+      VoteResponse("node1", 11, true),
+      List(StoreState)
+    ))
   }
 
   it should "accept AppendEntries when there is no missing log entry" in {
