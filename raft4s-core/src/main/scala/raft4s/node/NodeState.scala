@@ -3,10 +3,11 @@ package raft4s.node
 import raft4s.Action
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
+import raft4s.storage.PersistedState
 
 abstract class NodeState {
 
-  def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse)
+  def onReceive(logState: LogState, msg: VoteRequest): (NodeState, (VoteResponse, List[Action]))
 
   def onReceive(logState: LogState, msg: AppendEntries): (NodeState, (AppendEntriesResponse, List[Action]))
 
@@ -19,4 +20,6 @@ abstract class NodeState {
   def onReplicateLog(): List[Action]
 
   def leader: Option[String]
+
+  def toPersistedState: PersistedState
 }

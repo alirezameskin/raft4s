@@ -4,18 +4,21 @@ import cats.implicits._
 import cats.Monad
 import cats.effect.Concurrent
 import cats.effect.concurrent.{Deferred, Ref}
+import io.odin.Logger
 
-class LeaderAnnouncer[F[_]: Monad: Concurrent](
+class LeaderAnnouncer[F[_]: Monad: Concurrent: Logger](
   val announcer: Ref[F, Deferred[F, String]]
 ) {
   def announce(leaderId: String): F[Unit] =
     for {
+      _        <- Logger[F].info(s"A new leader is elected among the members. New Leader is '${leaderId}'.")
       deferred <- announcer.get
       _        <- deferred.complete(leaderId)
     } yield ()
 
   def reset(): F[Unit] =
     for {
+      _           <- Logger[F].debug("Resetting the Announcer.")
       newDeferred <- Deferred[F, String]
       _           <- announcer.set(newDeferred)
     } yield ()
@@ -28,7 +31,7 @@ class LeaderAnnouncer[F[_]: Monad: Concurrent](
 }
 
 object LeaderAnnouncer {
-  def build[F[_]: Monad: Concurrent]: F[LeaderAnnouncer[F]] =
+  def build[F[_]: Monad: Concurrent: Logger]: F[LeaderAnnouncer[F]] =
     for {
       deferred  <- Deferred[F, String]
       announcer <- Ref.of[F, Deferred[F, String]](deferred)

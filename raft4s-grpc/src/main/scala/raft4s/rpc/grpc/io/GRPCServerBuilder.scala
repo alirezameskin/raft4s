@@ -2,12 +2,13 @@ package raft4s.rpc.grpc.io
 
 import _root_.io.grpc.ServerBuilder
 import cats.effect.IO
+import io.odin.Logger
 import raft4s.grpc.protos
 import raft4s.rpc.grpc.io.internal.GRPCRaftService
 import raft4s.rpc.{RpcServer, RpcServerBuilder}
 import raft4s.{Address, Raft}
 
-class GRPCServerBuilder extends RpcServerBuilder[IO] {
+class GRPCServerBuilder(implicit L: Logger[IO]) extends RpcServerBuilder[IO] {
   override def build(address: Address, raft: Raft[IO]): IO[RpcServer[IO]] = {
 
     val service = protos.RaftGrpc.bindService(

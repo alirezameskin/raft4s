@@ -1,13 +1,16 @@
 package raft4s.storage
 
 import raft4s.log.Log
-import raft4s.node.NodeState
 
 trait Storage[F[_]] {
 
   def log: Log[F]
 
-  def persistState(state: NodeState): F[Unit]
+  def commitLength: F[Long]
 
-  def retrievePersistedState(): F[PersistedState]
+  def updateCommitLength(index: Long): F[Unit]
+
+  def persistState(state: PersistedState): F[Unit]
+
+  def retrievePersistedState(): F[Option[PersistedState]]
 }

@@ -7,9 +7,19 @@ import raft4s.storage.{PersistedState, Storage}
 
 class MemoryStorage[F[_]: Monad](val log: Log[F]) extends Storage[F] {
 
-  override def persistState(state: NodeState): F[Unit] = Monad[F].unit
+  var _commitIndex: Long = 0
 
-  override def retrievePersistedState(): F[PersistedState] = Monad[F].pure(PersistedState(0, None))
+  override def persistState(state: PersistedState): F[Unit] = Monad[F].unit
+
+  override def retrievePersistedState(): F[Option[PersistedState]] = Monad[F].pure(Some(PersistedState(0, None)))
+
+  override def commitLength: F[Long] =
+    Monad[F].pure(_commitIndex)
+
+  override def updateCommitLength(index: Long): F[Unit] =
+    Monad[F].pure {
+      _commitIndex = index
+    }
 
 }
 

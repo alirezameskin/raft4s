@@ -1,6 +1,7 @@
 package raft4s.rpc.grpc.io.internal
 
 import cats.effect.IO
+import io.odin.Logger
 import raft4s.Raft
 import raft4s.grpc.protos
 import raft4s.grpc.protos.{CommandRequest, CommandResponse}
@@ -8,12 +9,15 @@ import raft4s.protocol.{AppendEntries, Command, LogEntry, VoteRequest}
 
 import scala.concurrent.Future
 
-private[grpc] class GRPCRaftService(raft: Raft[IO]) extends protos.RaftGrpc.Raft {
+private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[IO]) extends protos.RaftGrpc.Raft {
 
   override def vote(request: protos.VoteRequest): Future[protos.VoteResponse] =
     raft
       .onReceive(VoteRequest(request.nodeId, request.currentTerm, request.logLength, request.logTerm))
       .map(res => protos.VoteResponse(res.nodeId, res.term, res.granted))
+      .handleErrorWith { error =>
+        logger.warn(s"Error during the VoteRequest process. Error ${error.getMessage}") *> IO.raiseError(error)
+      }
       .unsafeToFuture()
 
   override def appendEntries(request: protos.AppendEntriesRequest): Future[protos.AppendEntriesResponse] =
@@ -37,5 +41,8 @@ private[grpc] class GRPCRaftService(raft: Raft[IO]) extends protos.RaftGrpc.Raft
     raft
       .onCommand(ObjectSerializer.decode[Command[Any]](request.command))
       .map(response => protos.CommandResponse(ObjectSerializer.encode[Any](response)))
+      .handleErrorWith { error =>
+        logger.warn(s"An error during the command process. Error ${error.getMessage}") *> IO.raiseError(error)
+      }
       .unsafeToFuture()
 }

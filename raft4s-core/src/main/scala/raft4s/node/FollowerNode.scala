@@ -3,6 +3,7 @@ package raft4s.node
 import raft4s._
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
+import raft4s.storage.PersistedState
 
 case class FollowerNode(
   nodeId: String,
@@ -23,7 +24,7 @@ case class FollowerNode(
       (state, actions)
   }
 
-  override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse) = {
+  override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, (VoteResponse, List[Action])) = {
 
     val myLogTerm = logState.lastTerm.getOrElse(0L)
     val logOK     = (msg.logTerm > myLogTerm) || (msg.logTerm == myLogTerm && msg.logLength >= logState.length)
@@ -31,9 +32,12 @@ case class FollowerNode(
       (msg.currentTerm > currentTerm) || (msg.currentTerm == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
 
     if (logOK && termOK)
-      (this.copy(currentTerm = msg.currentTerm, votedFor = Some(msg.nodeId)), VoteResponse(nodeId, msg.currentTerm, true))
+      (
+        this.copy(currentTerm = msg.currentTerm, votedFor = Some(msg.nodeId)),
+        (VoteResponse(nodeId, msg.currentTerm, true), List(StoreState))
+      )
     else
-      (this, VoteResponse(nodeId, currentTerm, false))
+      (this, (VoteResponse(nodeId, currentTerm, false), List.empty))
   }
 
   override def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action]) =
@@ -47,23 +51,29 @@ case class FollowerNode(
     val logOK = if (logOK_ && msg.logLength > 0) { logState.lastTerm.contains(msg.logTerm) }
     else logOK_
 
-    if (msg.term == currentTerm_ && logOK)
+    if (msg.term == currentTerm_ && logOK) {
+
+      val leaderChangeActions =
+        if (currentLeader.isEmpty)
+          List(AnnounceLeader(msg.leaderId))
+        else if (currentLeader.contains(msg.leaderId))
+          List.empty
+        else
+          List(AnnounceLeader(msg.leaderId, true))
+
+      val stateChangedActions = if (currentTerm != currentTerm_) List(StoreState) else List.empty
+
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
         (
           AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
-          if (currentLeader.isEmpty)
-            List(AnnounceLeader(msg.leaderId))
-          else if (currentLeader.contains(msg.leaderId))
-            List.empty
-          else
-            List(AnnounceLeader(msg.leaderId, true))
+          stateChangedActions ::: leaderChangeActions
         )
       )
-    else
+    } else
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
-        (AppendEntriesResponse(nodeId, currentTerm_, 0, false), List.empty)
+        (AppendEntriesResponse(nodeId, currentTerm_, 0, false), if (currentTerm == currentTerm_) List.empty else List(StoreState))
       )
   }
 
@@ -73,5 +83,9 @@ case class FollowerNode(
   override def onReplicateLog(): List[Action] =
     List.empty
 
-  override def leader: Option[String] = currentLeader
+  override def leader: Option[String] =
+    currentLeader
+
+  override def toPersistedState: PersistedState =
+    PersistedState(currentTerm, votedFor)
 }

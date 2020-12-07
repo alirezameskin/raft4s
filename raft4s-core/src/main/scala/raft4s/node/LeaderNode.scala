@@ -2,7 +2,8 @@ package raft4s.node
 
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
-import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog}
+import raft4s.storage.PersistedState
+import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog, StoreState}
 
 case class LeaderNode(
   nodeId: String,
@@ -15,15 +16,18 @@ case class LeaderNode(
   override def onTimer(logState: LogState): (NodeState, List[Action]) =
     (this, List.empty)
 
-  override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, VoteResponse) = {
+  override def onReceive(logState: LogState, msg: VoteRequest): (NodeState, (VoteResponse, List[Action])) = {
     val lastTerm = logState.lastTerm.getOrElse(currentTerm)
-    val logOK    = (msg.logTerm > lastTerm) || (msg.logTerm == lastTerm && msg.logLength >= logState.length)
+    val logOK    = (msg.logTerm > lastTerm) || (msg.logTerm == lastTerm && msg.logLength > logState.length)
     val termOK   = msg.currentTerm >= currentTerm
 
     if (logOK && termOK)
-      (FollowerNode(nodeId, nodes, msg.currentTerm, Some(msg.nodeId)), VoteResponse(nodeId, msg.currentTerm, true))
+      (
+        FollowerNode(nodeId, nodes, msg.currentTerm, Some(msg.nodeId)),
+        (VoteResponse(nodeId, msg.currentTerm, true), List(StoreState))
+      )
     else
-      (this, VoteResponse(nodeId, msg.currentTerm, false))
+      (this, (VoteResponse(nodeId, msg.currentTerm, false), List.empty))
   }
 
   override def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action]) =
@@ -39,7 +43,7 @@ case class LeaderNode(
         FollowerNode(nodeId, nodes, currentTerm_, None, Some(msg.leaderId)),
         (
           AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
-          List(AnnounceLeader(msg.leaderId))
+          List(StoreState, AnnounceLeader(msg.leaderId))
         )
       )
     else
@@ -67,7 +71,7 @@ case class LeaderNode(
       } else
         (this, List.empty)
     else if (msg.currentTerm > currentTerm)
-      (FollowerNode(nodeId, nodes, msg.currentTerm), List.empty)
+      (FollowerNode(nodeId, nodes, msg.currentTerm), List(StoreState))
     else
       (this, List.empty)
 
@@ -76,5 +80,9 @@ case class LeaderNode(
       ReplicateLog(peer, currentTerm, sentLength(peer))
     }
 
-  override def leader: Option[String] = Some(nodeId)
+  override def leader: Option[String] =
+    Some(nodeId)
+
+  override def toPersistedState: PersistedState =
+    PersistedState(currentTerm, Some(nodeId))
 }

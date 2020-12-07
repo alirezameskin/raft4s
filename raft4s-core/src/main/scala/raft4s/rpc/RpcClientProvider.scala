@@ -4,9 +4,10 @@ import cats.Monad
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import cats.implicits._
+import io.odin.Logger
 import raft4s.Address
 
-class RpcClientProvider[F[_]: Monad: RpcClientBuilder](
+class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   val clients: Ref[F, Map[String, RpcClient[F]]],
   val members: Seq[Address]
 ) {
@@ -27,7 +28,7 @@ class RpcClientProvider[F[_]: Monad: RpcClientBuilder](
 }
 
 object RpcClientProvider {
-  def build[F[_]: Monad: Sync: RpcClientBuilder](members: Seq[Address]): F[RpcClientProvider[F]] =
+  def build[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Address]): F[RpcClientProvider[F]] =
     for {
       clients <- Ref.of[F, Map[String, RpcClient[F]]](Map.empty)
     } yield new RpcClientProvider[F](clients, members)

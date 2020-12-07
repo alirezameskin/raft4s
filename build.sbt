@@ -1,8 +1,9 @@
-lazy val Version           = "0.0.2"
+lazy val Version           = "0.0.3"
 lazy val ScalaVersion      = "2.13.4"
 lazy val CatsEffectVersion = "2.3.0"
 lazy val OdinVersion       = "0.9.1"
 lazy val ScalaTestVersion  = "3.2.0"
+lazy val RocksDbVersion    = "6.6.4"
 
 val GlobalSettingsGroup: Seq[Setting[_]] = Seq(
   version := Version,
@@ -42,6 +43,17 @@ lazy val grpc = (project in file("raft4s-grpc"))
   .dependsOn(core)
   .aggregate(core)
 
+lazy val rocksdb = (project in file("raft4s-rocksdb"))
+  .settings(GlobalSettingsGroup)
+  .settings(
+    name := "raft4s-rocksdb",
+    libraryDependencies ++= Seq(
+      "org.rocksdb" % "rocksdbjni" % RocksDbVersion
+    )
+  )
+  .dependsOn(core)
+  .aggregate(core)
+
 lazy val demo = (project in file("raft4s-demo"))
   .settings(GlobalSettingsGroup)
   .settings(
@@ -49,8 +61,8 @@ lazy val demo = (project in file("raft4s-demo"))
     publish := {},
     publishLocal := {}
   )
-  .dependsOn(core, grpc)
-  .aggregate(core, grpc)
+  .dependsOn(core, grpc, rocksdb)
+  .aggregate(core, grpc, rocksdb)
 
 lazy val root = (project in file("."))
   .aggregate(demo)

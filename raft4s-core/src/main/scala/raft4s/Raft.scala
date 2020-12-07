@@ -3,6 +3,7 @@ package raft4s
 import cats.effect.concurrent.{Deferred, Ref}
 import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
+import cats.syntax.monadError._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
 import raft4s.log.ReplicatedLog
@@ -26,7 +27,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   def start(): F[String] =
     for {
-      _      <- logger.trace("Cluster is starting")
+      _      <- logger.info("Cluster is starting")
       server <- RpcServerBuilder[F].build(config.local, this)
       _      <- server.start()
       _      <- logger.debug("RPC server started")
@@ -47,15 +48,19 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   def onReceive(msg: VoteRequest): F[VoteResponse] =
     for {
-      _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}")
+      _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
       logState <- log.state
-      response <- state.modify(_.onReceive(logState, msg))
-      _        <- logger.trace(s"Vote response to the request ${response}")
+      result   <- state.modify(_.onReceive(logState, msg))
+
+      (response, actions) = result
+
+      _ <- runActions(actions)
+      _ <- logger.trace(s"Vote response to the request ${response}")
     } yield response
 
   def onReceive(msg: VoteResponse): F[Unit] =
     for {
-      _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}")
+      _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
       logState <- log.state
       actions  <- state.modify(_.onReceive(logState, msg))
       _        <- runActions(actions)
@@ -63,12 +68,11 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   def onReceive(msg: AppendEntries): F[AppendEntriesResponse] =
     for {
-      _        <- logger.trace(s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries")
+      _        <- logger.trace(s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}")
       logState <- log.state
       current  <- state.get
       time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
       _        <- lastHeartbeat.set(time)
-      _        <- logger.trace("Updating the last heartbeat")
 
       (nextState, (response, actions)) = current.onReceive(logState, msg)
 
@@ -166,41 +170,58 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
     }
 
   private def runActions(actions: List[Action]): F[Unit] =
-    actions.parTraverse(action => runAction(action).attempt) *> Monad[F].unit
+    actions.traverse(action => runAction(action).attempt) *> Monad[F].unit
 
   private def runAction(action: Action): F[Unit] =
     action match {
       case RequestForVote(peerId, request) =>
-        for {
-          _        <- logger.trace(s"Sending a vote rerquest to ${peerId}. Request: ${request}")
-          client   <- clientProvider.client(peerId)
-          response <- client.send(request)
-          res      <- this.onReceive(response)
-        } yield res
+        Concurrent[F].start {
+          for {
+            _      <- logger.trace(s"Sending a vote request to ${peerId}. Request: ${request}")
+            client <- clientProvider.client(peerId)
+            result <- client.send(request).attempt
+            output <- result match {
+              case Left(error) => Logger[F].warn(s"An error during sending VoteRequest to ${peerId}. Error : ${error.getMessage}")
+              case Right(response) =>
+                this.onReceive(response)
+            }
+          } yield output
+        } *> Monad[F].unit
 
       case ReplicateLog(peerId, term, sentLength) =>
-        for {
-          _        <- logger.trace(s"Sending AppendEntries request to to ${peerId}. Term: ${term}")
-          append   <- log.getAppendEntries(config.nodeId, term, sentLength)
-          client   <- clientProvider.client(peerId)
-          response <- client.send(append)
-          _        <- this.onReceive(response)
-        } yield ()
+        Concurrent[F].start {
+          for {
+            _      <- logger.trace(s"Sending AppendEntries request to to ${peerId}. Term: ${term}")
+            append <- log.getAppendEntries(config.nodeId, term, sentLength)
+            client <- clientProvider.client(peerId)
+            result <- client.send(append).attempt
+            _ <- result match {
+              case Left(error) =>
+                Logger[F].warn(s"An error during replicating logs to ${peerId}. Error: ${error.getMessage}")
+              case Right(response) =>
+                this.onReceive(response)
+            }
+          } yield ()
+        } *> Monad[F].unit
 
       case CommitLogs(ackedLength, minAckes) =>
         log.commitLogs(ackedLength, minAckes)
 
       case AnnounceLeader(leaderId, true) =>
-        logger.trace(s"Announcing a new leader is elected, New leader: ${leaderId} ") *>
-          leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
+        leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
 
       case AnnounceLeader(leaderId, false) =>
-        logger.trace(s"Announcing a new leader is elected, New leader: ${leaderId} ") *>
-          leaderAnnouncer.announce(leaderId)
+        leaderAnnouncer.announce(leaderId)
 
       case ResetLeaderAnnouncer =>
-        logger.trace("Resetting the leader announcer for the new leader.") *>
-          leaderAnnouncer.reset()
+        leaderAnnouncer.reset()
+
+      case StoreState =>
+        for {
+          _    <- logger.trace("Storing the new state in the storage")
+          node <- state.get
+          _    <- storage.persistState(node.toPersistedState)
+        } yield ()
     }
 
   private def runElection(): F[Unit] =
@@ -251,9 +272,11 @@ object Raft {
       persistedState  <- storage.retrievePersistedState()
       clientProvider  <- RpcClientProvider.build[F](config.members)
       leaderAnnouncer <- LeaderAnnouncer.build[F]
-      nodeState       <- Ref.of[F, NodeState](FollowerNode(config.nodeId, config.nodes, persistedState.term, persistedState.votedFor))
-      heartbeat       <- Ref.of[F, Long](0L)
-      replicateLog = ReplicatedLog.build[F](storage.log, stateMachine)
+      nodeState <- Ref.of[F, NodeState](
+        FollowerNode(config.nodeId, config.nodes, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
+      )
+      heartbeat <- Ref.of[F, Long](0L)
+      replicateLog = ReplicatedLog.build[F](storage, stateMachine)
 
     } yield new Raft[F](config, clientProvider, leaderAnnouncer, replicateLog, storage, nodeState, heartbeat)
 }
