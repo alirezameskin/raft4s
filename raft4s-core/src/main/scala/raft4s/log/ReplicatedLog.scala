@@ -17,10 +17,10 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
   def getAppendEntries(leaderId: String, term: Long, sentLength: Long): F[AppendEntries] =
     for {
       length       <- storage.log.length
-      commitLength <- storage.commitLength
+      appliedIndex <- stateMachine.appliedIndex
       entries      <- (sentLength until length).toList.traverse(i => storage.log.get(i))
       prevLogTerm  <- if (sentLength > 0) storage.log.get(sentLength - 1).map(_.term) else Monad[F].pure(0L)
-    } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, commitLength, entries)
+    } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, appliedIndex, entries)
 
   def state: F[LogState] =
     for {
@@ -40,10 +40,10 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
   def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Unit] =
     for {
       logLength    <- storage.log.length
-      commitLength <- storage.commitLength
+      appliedIndex <- stateMachine.appliedIndex
       _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
       _            <- putEntries(entries, logLength, leaderLogLength)
-      _            <- (commitLength until leaderCommit).toList.traverse(commit)
+      _            <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
     } yield ()
 
   def commitLogs(ackedLength: Map[String, Long], minAckes: Int): F[Unit] = {
@@ -51,8 +51,8 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
 
     for {
       logLength    <- storage.log.length
-      commitLength <- storage.commitLength
-      _            <- (commitLength until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
+      appliedIndex <- stateMachine.appliedIndex
+      _            <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
     } yield ()
   }
 
@@ -82,7 +82,6 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
       _     <- Logger[F].trace(s"Committing the log entry at index ${index}")
       entry <- storage.log.get(index)
       _     <- applyCommand(index, entry.command)
-      _     <- storage.updateCommitLength(index + 1)
     } yield ()
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {

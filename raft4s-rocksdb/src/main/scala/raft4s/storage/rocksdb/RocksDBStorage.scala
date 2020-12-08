@@ -16,8 +16,7 @@ class RocksDBStorage[F[_]: Sync: Logger](db: jrocks.RocksDB, logsHandler: Column
   implicit ME: MonadError[F, Throwable]
 ) extends Storage[F] {
 
-  private val NODE_STATE_KEY   = "latest_state".getBytes
-  private val COMMIT_INDEX_KEY = "commit_state".getBytes
+  private val NODE_STATE_KEY = "latest_state".getBytes
 
   override val log: Log[F] = new RocksDBLog[F](db, logsHandler)
 
@@ -25,25 +24,16 @@ class RocksDBStorage[F[_]: Sync: Logger](db: jrocks.RocksDB, logsHandler: Column
     for {
       _     <- Logger[F].debug(s"Persisting the state ${state}")
       value <- ME.fromTry(Try(ObjectSerializer.encode(state)))
-      _     <- ME.fromTry(Try(db.put(NODE_STATE_KEY, value)))
+      _     <- ME.fromTry(Try(db.put(stateHandler, NODE_STATE_KEY, value)))
     } yield ()
 
   override def retrievePersistedState(): F[Option[PersistedState]] =
     for {
       _      <- Logger[F].debug("Retreiving the persisted state")
-      bytes  <- ME.fromTry(Try(db.get(NODE_STATE_KEY)))
+      bytes  <- ME.fromTry(Try(db.get(stateHandler, NODE_STATE_KEY)))
       result <- ME.fromTry(Try(Option(bytes).map(ObjectSerializer.decode[PersistedState])))
       _      <- Logger[F].debug(s"Retreived state ${result}")
     } yield result
-
-  override def commitLength: F[Long] =
-    Sync[F].delay(Option(db.get(stateHandler, COMMIT_INDEX_KEY)).map(LongSerializer.toLong).getOrElse(0L))
-
-  override def updateCommitLength(index: Long): F[Unit] =
-    for {
-      _ <- Sync[F].delay(db.put(stateHandler, COMMIT_INDEX_KEY, LongSerializer.toBytes(index)))
-      _ <- Logger[F].trace(s"Updating the commit length to ${index}")
-    } yield ()
 }
 
 object RocksDBStorage {

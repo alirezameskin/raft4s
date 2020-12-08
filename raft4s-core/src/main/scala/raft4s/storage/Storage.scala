@@ -6,10 +6,6 @@ trait Storage[F[_]] {
 
   def log: Log[F]
 
-  def commitLength: F[Long]
-
-  def updateCommitLength(index: Long): F[Unit]
-
   def persistState(state: PersistedState): F[Unit]
 
   def retrievePersistedState(): F[Option[PersistedState]]

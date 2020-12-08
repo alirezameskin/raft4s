@@ -79,7 +79,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       _ <- runActions(actions)
       _ <-
         if (response.success)
-          log.appendEntries(msg.entries, msg.logLength, msg.leaderCommit) *> state.set(nextState)
+          log.appendEntries(msg.entries, msg.logLength, msg.leaderAppliedIndex) *> state.set(nextState)
         else
           Monad[F].unit
     } yield response

@@ -5,6 +5,6 @@ case class AppendEntries(
   term: Long,
   logLength: Long,
   logTerm: Long,
-  leaderCommit: Long,
+  leaderAppliedIndex: Long,
   entries: List[LogEntry]
 )

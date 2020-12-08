@@ -11,7 +11,7 @@ case class Get(key: String)                extends ReadCommand[String]
 
 class KvStateMachine extends StateMachine[IO] {
   private var map             = new HashMap[String, String]()
-  private var lastIndex: Long = 0
+  private var lastIndex: Long = -1
 
   override def applyWrite: PartialFunction[(Long, WriteCommand[_]), IO[Any]] = { case (index, Put(key, value)) =>
     IO {
@@ -24,4 +24,6 @@ class KvStateMachine extends StateMachine[IO] {
   override def applyRead: PartialFunction[ReadCommand[_], IO[Any]] = { case Get(key) =>
     IO.pure(map.get(key))
   }
+
+  override def appliedIndex: IO[Long] = IO(lastIndex)
 }

@@ -6,4 +6,6 @@ trait StateMachine[F[_]] {
   def applyWrite: PartialFunction[(Long, WriteCommand[_]), F[Any]]
 
   def applyRead: PartialFunction[ReadCommand[_], F[Any]]
+
+  def appliedIndex: F[Long]
 }

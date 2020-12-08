@@ -34,7 +34,7 @@ private[grpc] class GRPCRaftClient(address: Address, stub: RaftGrpc.RaftStub)(im
       appendEntries.term,
       appendEntries.logLength,
       appendEntries.logTerm,
-      appendEntries.leaderCommit,
+      appendEntries.leaderAppliedIndex,
       appendEntries.entries.map(entry =>
         protos.LogEntry(entry.term, entry.index, ObjectSerializer.encode[Command[_]](entry.command))
       )
