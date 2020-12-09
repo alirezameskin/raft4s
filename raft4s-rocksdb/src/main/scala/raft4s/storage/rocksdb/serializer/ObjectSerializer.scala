@@ -1,4 +1,4 @@
-package raft4s.storage.rocksdb
+package raft4s.storage.rocksdb.serializer
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 

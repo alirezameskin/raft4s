@@ -1,14 +1,14 @@
 package raft4s.demo
 
-import java.util.concurrent.TimeUnit
 import cats.effect.{ContextShift, IO, Timer}
 import io.odin
 import io.odin.Logger
-import raft4s.protocol.{AppendEntries, AppendEntriesResponse, Command, VoteRequest, VoteResponse, WriteCommand}
+import raft4s.protocol._
 import raft4s.rpc._
 import raft4s.storage.memory.MemoryStorage
 import raft4s.{Address, Configuration, Raft}
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
 object RaftTest extends App {

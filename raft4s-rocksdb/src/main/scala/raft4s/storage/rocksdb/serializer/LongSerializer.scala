@@ -1,4 +1,4 @@
-package raft4s.storage.rocksdb
+package raft4s.storage.rocksdb.serializer
 
 import java.nio.ByteBuffer
 

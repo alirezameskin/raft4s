@@ -1,45 +1,45 @@
 package raft4s.log
 
 import cats.Monad
-import cats.implicits._
 import cats.effect.concurrent.Deferred
+import cats.implicits._
 import io.odin.Logger
 import raft4s.StateMachine
-import raft4s.protocol.{AppendEntries, Command, LogEntry, ReadCommand, WriteCommand}
-import raft4s.storage.Storage
+import raft4s.protocol._
+import raft4s.storage.LogStorage
 
 import scala.collection.concurrent.TrieMap
 
-class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachine: StateMachine[F]) {
+class ReplicatedLog[F[_]: Monad: Logger](val storage: LogStorage[F], val stateMachine: StateMachine[F]) {
 
   private val deferreds = TrieMap[Long, Deferred[F, Any]]()
 
   def getAppendEntries(leaderId: String, term: Long, sentLength: Long): F[AppendEntries] =
     for {
-      length       <- storage.log.length
+      length       <- storage.length
       appliedIndex <- stateMachine.appliedIndex
-      entries      <- (sentLength until length).toList.traverse(i => storage.log.get(i))
-      prevLogTerm  <- if (sentLength > 0) storage.log.get(sentLength - 1).map(_.term) else Monad[F].pure(0L)
+      entries      <- (sentLength until length).toList.traverse(i => storage.get(i))
+      prevLogTerm  <- if (sentLength > 0) storage.get(sentLength - 1).map(_.term) else Monad[F].pure(0L)
     } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, appliedIndex, entries)
 
   def state: F[LogState] =
     for {
-      length <- storage.log.length
-      term   <- if (length > 0) storage.log.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
+      length <- storage.length
+      term   <- if (length > 0) storage.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
     } yield LogState(length, term)
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
     for {
-      length <- storage.log.length
+      length <- storage.length
       logEntry = LogEntry(term, length, command)
       _ <- Logger[F].trace(s"Appending a command to the log. Term: ${term}, Index: ${length}")
-      _ <- storage.log.put(logEntry.index, logEntry)
+      _ <- storage.put(logEntry.index, logEntry)
       _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
     } yield logEntry
 
   def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Unit] =
     for {
-      logLength    <- storage.log.length
+      logLength    <- storage.length
       appliedIndex <- stateMachine.appliedIndex
       _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
       _            <- putEntries(entries, logLength, leaderLogLength)
@@ -50,7 +50,7 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
     val acked: Long => Boolean = index => ackedLength.count(_._2 >= index) >= minAckes
 
     for {
-      logLength    <- storage.log.length
+      logLength    <- storage.length
       appliedIndex <- stateMachine.appliedIndex
       _            <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
     } yield ()
@@ -61,9 +61,9 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
       Logger[F].trace(
         s"Truncating unfinished log entries from the Log. Leader log Length: ${leaderLogSent}, server log length :${logLength} "
       ) *>
-        storage.log.get(logLength).flatMap { entry =>
+        storage.get(logLength).flatMap { entry =>
           if (entry != null && entry.term != entries.head.term) {
-            (leaderLogSent until logLength).toList.traverse(storage.log.delete) *> Monad[F].unit
+            (leaderLogSent until logLength).toList.traverse(storage.delete) *> Monad[F].unit
           } else Monad[F].unit
         }
     } else Monad[F].unit
@@ -74,13 +74,13 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
       (start until entries.length).map(i => entries(i.toInt)).toList
     } else List.empty
 
-    logEntries.traverse(entry => storage.log.put(entry.index, entry)) *> Monad[F].unit
+    logEntries.traverse(entry => storage.put(entry.index, entry)) *> Monad[F].unit
   }
 
   private def commit(index: Long): F[Unit] =
     for {
       _     <- Logger[F].trace(s"Committing the log entry at index ${index}")
-      entry <- storage.log.get(index)
+      entry <- storage.get(index)
       _     <- applyCommand(index, entry.command)
     } yield ()
 
@@ -104,6 +104,6 @@ class ReplicatedLog[F[_]: Monad: Logger](val storage: Storage[F], val stateMachi
 }
 
 object ReplicatedLog {
-  def build[F[_]: Monad: Logger](storage: Storage[F], stateMachine: StateMachine[F]): ReplicatedLog[F] =
+  def build[F[_]: Monad: Logger](storage: LogStorage[F], stateMachine: StateMachine[F]): ReplicatedLog[F] =
     new ReplicatedLog(storage, stateMachine)
 }

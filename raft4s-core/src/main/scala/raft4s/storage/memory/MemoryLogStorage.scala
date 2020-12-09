@@ -1,12 +1,12 @@
 package raft4s.storage.memory
 
 import cats.Monad
-import raft4s.log.Log
 import raft4s.protocol.LogEntry
+import raft4s.storage.LogStorage
 
 import scala.collection.concurrent.TrieMap
 
-class MemoryLog[F[_]: Monad] extends Log[F] {
+class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
 
   private val map = TrieMap[Long, LogEntry]()
 
@@ -28,6 +28,6 @@ class MemoryLog[F[_]: Monad] extends Log[F] {
     }
 }
 
-object MemoryLog {
-  def empty[F[_]: Monad] = new MemoryLog[F]
+object MemoryLogStorage {
+  def empty[F[_]: Monad] = new MemoryLogStorage[F]
 }

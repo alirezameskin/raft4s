@@ -3,7 +3,6 @@ package raft4s
 import cats.effect.concurrent.{Deferred, Ref}
 import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
-import cats.syntax.monadError._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
 import raft4s.log.ReplicatedLog
@@ -220,7 +219,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
         for {
           _    <- logger.trace("Storing the new state in the storage")
           node <- state.get
-          _    <- storage.persistState(node.toPersistedState)
+          _    <- storage.stateStorage.persistState(node.toPersistedState)
         } yield ()
     }
 
@@ -269,14 +268,14 @@ object Raft {
     stateMachine: StateMachine[F]
   ): F[Raft[F]] =
     for {
-      persistedState  <- storage.retrievePersistedState()
+      persistedState  <- storage.stateStorage.retrieveState()
       clientProvider  <- RpcClientProvider.build[F](config.members)
       leaderAnnouncer <- LeaderAnnouncer.build[F]
       nodeState <- Ref.of[F, NodeState](
         FollowerNode(config.nodeId, config.nodes, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
       )
       heartbeat <- Ref.of[F, Long](0L)
-      replicateLog = ReplicatedLog.build[F](storage, stateMachine)
+      replicateLog = ReplicatedLog.build[F](storage.logStorage, stateMachine)
 
     } yield new Raft[F](config, clientProvider, leaderAnnouncer, replicateLog, storage, nodeState, heartbeat)
 }

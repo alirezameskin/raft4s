@@ -1,8 +1,9 @@
-package raft4s.log
+package raft4s.storage
 
 import raft4s.protocol.LogEntry
 
-trait Log[F[_]] {
+trait LogStorage[F[_]] {
+
   def length: F[Long]
 
   def get(index: Long): F[LogEntry]

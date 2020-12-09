@@ -1,47 +1,21 @@
 package raft4s.storage.rocksdb
 
-import cats.MonadError
 import cats.effect.{Resource, Sync}
 import cats.implicits._
 import io.odin.Logger
 import org.rocksdb._
 import org.{rocksdb => jrocks}
-import raft4s.log.Log
-import raft4s.storage.{PersistedState, Storage}
+import raft4s.storage.Storage
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
-
-class RocksDBStorage[F[_]: Sync: Logger](db: jrocks.RocksDB, logsHandler: ColumnFamilyHandle, stateHandler: ColumnFamilyHandle)(
-  implicit ME: MonadError[F, Throwable]
-) extends Storage[F] {
-
-  private val NODE_STATE_KEY = "latest_state".getBytes
-
-  override val log: Log[F] = new RocksDBLog[F](db, logsHandler)
-
-  override def persistState(state: PersistedState): F[Unit] =
-    for {
-      _     <- Logger[F].debug(s"Persisting the state ${state}")
-      value <- ME.fromTry(Try(ObjectSerializer.encode(state)))
-      _     <- ME.fromTry(Try(db.put(stateHandler, NODE_STATE_KEY, value)))
-    } yield ()
-
-  override def retrievePersistedState(): F[Option[PersistedState]] =
-    for {
-      _      <- Logger[F].debug("Retreiving the persisted state")
-      bytes  <- ME.fromTry(Try(db.get(stateHandler, NODE_STATE_KEY)))
-      result <- ME.fromTry(Try(Option(bytes).map(ObjectSerializer.decode[PersistedState])))
-      _      <- Logger[F].debug(s"Retreived state ${result}")
-    } yield result
-}
 
 object RocksDBStorage {
   val LOGS_COLUMN_FAMILY  = "logs"
   val STATE_COLUMN_FAMILY = "state"
   val DEFAULT_FAMILY      = "default"
 
-  def open[F[_]: Sync: Logger](path: String): Resource[F, RocksDBStorage[F]] = {
+  def open[F[_]: Sync: Logger](path: String): Resource[F, Storage[F]] = {
     val acquire = for {
       _      <- Try(jrocks.RocksDB.loadLibrary()).liftTo[F]
       _      <- createRequiredColumnFamilies(path).liftTo[F]
@@ -53,7 +27,9 @@ object RocksDBStorage {
       resources <- Resource.make(acquire)(r => Sync[F].delay(r._1.close()))
 
       (db, logsHandle, stateHandle) = resources
-    } yield new RocksDBStorage[F](db, logsHandle, stateHandle)
+      logStorage                    = new RocksDBLogStorage[F](db, logsHandle)
+      stateStorage                  = new RocksDBStateStorage[F](db, stateHandle)
+    } yield Storage[F](logStorage, stateStorage)
   }
 
   private def createRequiredColumnFamilies(path: String): Try[Unit] = Try {

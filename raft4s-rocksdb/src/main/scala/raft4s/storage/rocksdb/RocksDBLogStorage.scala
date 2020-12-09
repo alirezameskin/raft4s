@@ -3,14 +3,15 @@ package raft4s.storage.rocksdb
 import cats.effect.Sync
 import io.odin.Logger
 import org.{rocksdb => jrocks}
-import raft4s.log.Log
 import raft4s.protocol.LogEntry
+import raft4s.storage.LogStorage
+import raft4s.storage.rocksdb.serializer.{LongSerializer, ObjectSerializer}
 
-class RocksDBLog[F[_]: Sync: Logger](db: jrocks.RocksDB, logHandler: jrocks.ColumnFamilyHandle) extends Log[F] {
+class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB, handle: jrocks.ColumnFamilyHandle) extends LogStorage[F] {
 
   override def length: F[Long] =
     Sync[F].delay {
-      val iterator = db.newIterator(logHandler)
+      val iterator = db.newIterator(handle)
       iterator.seekToLast()
 
       if (iterator.isValid) {
@@ -24,7 +25,7 @@ class RocksDBLog[F[_]: Sync: Logger](db: jrocks.RocksDB, logHandler: jrocks.Colu
 
   override def get(index: Long): F[LogEntry] =
     Sync[F].delay {
-      val bytes = db.get(logHandler, LongSerializer.toBytes(index))
+      val bytes = db.get(handle, LongSerializer.toBytes(index))
       Option(bytes).map(ObjectSerializer.decode[LogEntry]).orNull
     }
 
@@ -33,13 +34,13 @@ class RocksDBLog[F[_]: Sync: Logger](db: jrocks.RocksDB, logHandler: jrocks.Colu
       val bytes = ObjectSerializer.encode(logEntry)
       val key   = LongSerializer.toBytes(index)
 
-      db.put(logHandler, key, bytes)
+      db.put(handle, key, bytes)
 
       logEntry
     }
 
   override def delete(index: Long): F[Unit] =
     Sync[F].delay {
-      db.delete(logHandler, LongSerializer.toBytes(index))
+      db.delete(handle, LongSerializer.toBytes(index))
     }
 }
