@@ -3,7 +3,7 @@ package raft4s.node
 import raft4s.Action
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
-import raft4s.storage.PersistedState
+import raft4s.storage.internal.PersistedState
 
 abstract class NodeState {
 
