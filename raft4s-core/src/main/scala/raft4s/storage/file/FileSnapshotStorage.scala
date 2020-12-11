@@ -12,9 +12,19 @@ import scala.util.Try
 class FileSnapshotStorage[F[_]: Sync](path: Path) extends SnapshotStorage[F] {
   override def saveSnapshot(snapshot: Snapshot): F[Unit] =
     Sync[F].delay {
-      val content = List(snapshot.lastIndex.toString, snapshot.lastTerm.toString)
+      println("Saving an Snapshot")
+      val content = List(snapshot.lastIndex.toString)
+      println(s"Saving Snapshot ${content}")
       Files.write(path.resolve("snapshot_state"), content.asJava, StandardCharsets.UTF_8)
-      Files.write(path.resolve("snapshot"), snapshot.bytes.array())
+      println(s"Saving Snapshot state")
+      try {
+        println(s"Snapshot bytes ${snapshot.bytes.array()}")
+        Files.write(path.resolve("snapshot"), snapshot.bytes.array())
+      } catch {
+        case e => e.printStackTrace()
+      }
+
+      println(s"Saving Snapshot data")
     }
 
   override def retrieveSnapshot(): F[Option[Snapshot]] =
@@ -22,9 +32,8 @@ class FileSnapshotStorage[F[_]: Sync](path: Path) extends SnapshotStorage[F] {
       val state = for {
         lines      <- Try(Files.readAllLines(path.resolve("snapshot_state"), StandardCharsets.UTF_8).asScala)
         lastIndex  <- Try(lines.head.toLong)
-        lastTerm   <- Try(lines.tail.head.toLong)
         bytebuffer <- Try(Files.readAllBytes(path.resolve("snapshot"))).map(nio.ByteBuffer.wrap)
-      } yield Snapshot(lastIndex, lastTerm, bytebuffer)
+      } yield Snapshot(lastIndex, bytebuffer)
 
       state.toOption
     }

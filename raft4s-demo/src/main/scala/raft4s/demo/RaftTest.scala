@@ -5,6 +5,7 @@ import io.odin
 import io.odin.Logger
 import raft4s.protocol._
 import raft4s.rpc._
+import raft4s.storage.Snapshot
 import raft4s.storage.memory.MemoryStorage
 import raft4s.{Address, Configuration, Raft}
 
@@ -21,11 +22,17 @@ object RaftTest extends App {
 
   implicit val clientBuilder = new RpcClientBuilder[IO] {
     override def build(address: Address): RpcClient[IO] = new RpcClient[IO] {
-      override def send(voteRequest: VoteRequest): IO[VoteResponse] = clients(address.id).send(voteRequest)
+      override def send(voteRequest: VoteRequest): IO[VoteResponse] =
+        clients(address.id).send(voteRequest)
 
-      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] = clients(address.id).send(appendEntries)
+      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
+        clients(address.id).send(appendEntries)
 
-      override def send[T](command: Command[T]): IO[T] = clients(address.id).send(command)
+      override def send[T](command: Command[T]): IO[T] =
+        clients(address.id).send(command)
+
+      override def send(snapshot: Snapshot, lastEntry: LogEntry): IO[AppendEntriesResponse] =
+        clients(address.id).send(snapshot, lastEntry)
     }
   }
 
@@ -108,5 +115,10 @@ object RaftTest extends App {
 
       override def send[T](command: Command[T]): IO[T] =
         IO(println(s"Sending a command to node ${node.config.local.id}")) *> node.onCommand(command)
+
+      override def send(snapshot: Snapshot, lastEntry: LogEntry): IO[AppendEntriesResponse] =
+        IO(println(s"Sending an snapshot to node ${node.config.local.id}")) *> node.onReceive(
+          InstallSnapshot(snapshot, lastEntry)
+        )
     }
 }

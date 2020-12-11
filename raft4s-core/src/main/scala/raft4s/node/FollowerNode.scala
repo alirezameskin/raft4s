@@ -91,4 +91,7 @@ case class FollowerNode(
 
   override def toPersistedState: PersistedState =
     PersistedState(currentTerm, votedFor)
+
+  override def onSnapshotInstalled(logState: LogState): (NodeState, AppendEntriesResponse) =
+    (this, AppendEntriesResponse(nodeId, currentTerm, logState.length - 1, true))
 }

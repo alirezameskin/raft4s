@@ -1,3 +1,5 @@
 package raft4s.log
 
-case class LogState(length: Long, lastTerm: Option[Long], appliedIndex: Option[Long])
+import raft4s.storage.Snapshot
+
+case class LogState(length: Long, lastTerm: Option[Long], appliedIndex: Option[Long] = None, snapshot: Option[Snapshot] = None)

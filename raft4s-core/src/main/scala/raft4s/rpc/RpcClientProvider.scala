@@ -7,6 +7,7 @@ import cats.{Monad, MonadError}
 import io.odin.Logger
 import raft4s.Address
 import raft4s.protocol._
+import raft4s.storage.Snapshot
 
 class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   val clients: Ref[F, Map[String, RpcClient[F]]],
@@ -27,6 +28,13 @@ class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
       result  <- logErrors(serverId, attempt)
     } yield result
 
+  def send(serverId: String, snapshot: Snapshot, lastEntry: LogEntry): F[AppendEntriesResponse] =
+    for {
+      client   <- getClient(serverId)
+      attempt  <- client.send(snapshot, lastEntry).attempt
+      response <- logErrors(serverId, attempt)
+    } yield response
+
   def send[T](serverId: String, command: Command[T]): F[T] =
     for {
       client  <- getClient(serverId)
@@ -37,7 +45,7 @@ class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   private def logErrors[T](peerId: String, result: Either[Throwable, T]): F[T] =
     result match {
       case Left(error) =>
-        Logger[F].warn(s"An error during communication with ${peerId}. Error: ${error.getMessage}") *> ME.raiseError(error)
+        Logger[F].warn(s"An error during communication with ${peerId}. Error: ${error}") *> ME.raiseError(error)
       case Right(value) =>
         Monad[F].pure(value)
     }

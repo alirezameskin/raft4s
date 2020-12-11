@@ -92,6 +92,13 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       _        <- runActions(actions)
     } yield ()
 
+  def onReceive(msg: InstallSnapshot): F[AppendEntriesResponse] =
+    for {
+      _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
+      logState <- log.state
+      response <- state.modify(_.onSnapshotInstalled(logState))
+    } yield response
+
   def onCommand[T](command: Command[T]): F[T] =
     command match {
       case command: ReadCommand[_] =>
@@ -208,6 +215,18 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
           _    <- logger.trace("Storing the new state in the storage")
           node <- state.get
           _    <- storage.stateStorage.persistState(node.toPersistedState)
+        } yield ()
+
+      case SendSnapshot(peerId, snapshot) =>
+        for {
+          _        <- logger.trace(s"Installing an Snapshot for peer ${peerId}, snapshot: ${snapshot}")
+          logEntry <- log.logStorage.get(snapshot.lastIndex)
+          response <- clientProvider.send(peerId, snapshot, logEntry)
+          _        <- logger.trace(s"Response after installing snapshot ${response}")
+          logState <- log.state
+          actions  <- state.modify(_.onReceive(logState, response))
+          _        <- logger.trace(s"Logger after sending snapshot ${actions}")
+          _        <- runActions(actions)
         } yield ()
     }
 

@@ -3,7 +3,7 @@ package raft4s.node
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.storage.internal.PersistedState
-import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog, StoreState}
+import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog, SendSnapshot, StoreState}
 
 case class LeaderNode(
   nodeId: String,
@@ -61,11 +61,15 @@ case class LeaderNode(
           List(CommitLogs(ackedLength_ + (nodeId -> logState.length), (nodes.size + 1) / 2))
         )
 
+      } else if (logState.snapshot.isDefined && msg.ack < logState.snapshot.map(_.lastIndex).getOrElse(0L)) {
+        val sentLength_ = sentLength + (msg.nodeId -> logState.snapshot.map(_.lastIndex).getOrElse(0L))
+        val actions     = List(SendSnapshot(msg.nodeId, logState.snapshot.get))
+
+        (this.copy(sentLength = sentLength_), actions)
+
       } else if (sentLength(msg.nodeId) > 0) {
         val sentLength_ = sentLength + (msg.nodeId -> (sentLength(msg.nodeId) - 1))
-        val actions = nodes.filterNot(_ == nodeId).map { peer =>
-          ReplicateLog(peer, currentTerm, sentLength_(peer))
-        }
+        val actions     = List(ReplicateLog(msg.nodeId, currentTerm, sentLength_(msg.nodeId)))
 
         (this.copy(sentLength = sentLength_), actions)
       } else
@@ -85,4 +89,7 @@ case class LeaderNode(
 
   override def toPersistedState: PersistedState =
     PersistedState(currentTerm, Some(nodeId))
+
+  override def onSnapshotInstalled(logState: LogState): (NodeState, AppendEntriesResponse) =
+    (this, AppendEntriesResponse(nodeId, currentTerm, logState.length - 1, false))
 }

@@ -1,13 +1,13 @@
 package raft4s.log
 
-import cats.Monad
+import cats.{Monad, MonadError}
 import cats.effect.Concurrent
-import cats.effect.concurrent.{Deferred, Semaphore}
+import cats.effect.concurrent.{Deferred, Ref, Semaphore}
 import cats.implicits._
 import io.odin.Logger
 import raft4s.StateMachine
 import raft4s.protocol._
-import raft4s.storage.{LogStorage, SnapshotStorage}
+import raft4s.storage.{LogStorage, Snapshot, SnapshotStorage}
 
 import scala.collection.concurrent.TrieMap
 
@@ -15,8 +15,9 @@ class ReplicatedLog[F[_]: Monad: Logger](
   val logStorage: LogStorage[F],
   val snapshotStorage: SnapshotStorage[F],
   val stateMachine: StateMachine[F],
-  val semaphore: Semaphore[F]
-) {
+  val semaphore: Semaphore[F],
+  val latestSnapshot: Ref[F, Option[Snapshot]]
+)(implicit ME: MonadError[F, Throwable]) {
 
   private val deferreds = TrieMap[Long, Deferred[F, Any]]()
 
@@ -24,9 +25,29 @@ class ReplicatedLog[F[_]: Monad: Logger](
     for {
       _        <- Logger[F].trace("Initializing log")
       snapshot <- snapshotStorage.retrieveSnapshot()
+      _        <- latestSnapshot.set(snapshot)
       _        <- snapshot.map(stateMachine.restoreSnapshot).getOrElse(Monad[F].unit)
       _        <- Logger[F].trace(s"Retrieving snapshot ${snapshot}")
     } yield ()
+
+  def installSnapshot(snapshot: Snapshot, lastEntry: LogEntry): F[Unit] =
+    semaphore.withPermit {
+      for {
+        lastSnapshot <- latestSnapshot.get
+        _ <-
+          if (lastSnapshot.map(_.lastIndex).exists(_ >= snapshot.lastIndex))
+            ME.raiseError(new RuntimeException("A new snapshot is already applied"))
+          else Monad[F].unit
+        _ <- Logger[F].trace(s"Installing a snapshot, ${snapshot}")
+        _ <- snapshotStorage.saveSnapshot(snapshot)
+        _ <- Logger[F].trace("Restoring state from snapshot")
+        _ <- stateMachine.restoreSnapshot(snapshot)
+        _ <- Logger[F].trace("Restoring state from snapshot is done")
+        _ <- latestSnapshot.set(Some(snapshot))
+        _ <- Logger[F].trace(s"Snapshot installation is done ${snapshot}")
+        _ <- logStorage.put(lastEntry.index, lastEntry)
+      } yield ()
+    }
 
   def getAppendEntries(leaderId: String, term: Long, sentLength: Long): F[AppendEntries] =
     for {
@@ -41,7 +62,8 @@ class ReplicatedLog[F[_]: Monad: Logger](
       length       <- logStorage.length
       term         <- if (length > 0) logStorage.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
       appliedIndex <- stateMachine.appliedIndex
-    } yield LogState(length, term, Some(appliedIndex))
+      snapshot     <- latestSnapshot.get
+    } yield LogState(length, term, Some(appliedIndex), snapshot)
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
     for {
@@ -53,24 +75,26 @@ class ReplicatedLog[F[_]: Monad: Logger](
     } yield logEntry
 
   def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Unit] =
-    for {
-      _            <- semaphore.acquire
-      logLength    <- logStorage.length
-      appliedIndex <- stateMachine.appliedIndex
-      _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
-      _            <- putEntries(entries, logLength, leaderLogLength)
-      _            <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
-      _            <- semaphore.release
-    } yield ()
+    semaphore.withPermit {
+      for {
+        logLength    <- logStorage.length
+        appliedIndex <- stateMachine.appliedIndex
+        _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
+        _            <- putEntries(entries, logLength, leaderLogLength)
+        _            <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
+      } yield ()
+    }
 
   def commitLogs(ackedLength: Map[String, Long], minAckes: Int): F[Unit] = {
     val acked: Long => Boolean = index => ackedLength.count(_._2 >= index) >= minAckes
 
-    for {
-      logLength    <- logStorage.length
-      appliedIndex <- stateMachine.appliedIndex
-      _            <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
-    } yield ()
+    semaphore.withPermit {
+      for {
+        logLength    <- logStorage.length
+        appliedIndex <- stateMachine.appliedIndex
+        _            <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
+      } yield ()
+    }
   }
 
   private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogSent: Long): F[Unit] =
@@ -124,7 +148,8 @@ class ReplicatedLog[F[_]: Monad: Logger](
       _        <- Logger[F].trace("Starting to take snapshot")
       snapshot <- stateMachine.takeSnapshot()
       _        <- snapshotStorage.saveSnapshot(snapshot)
-      _        <- Logger[F].trace("Snapshot is stored")
+      _        <- latestSnapshot.set(Some(snapshot))
+      _        <- Logger[F].trace(s"Snapshot is stored ${snapshot}")
     } yield ()
 
 }
@@ -136,6 +161,7 @@ object ReplicatedLog {
     stateMachine: StateMachine[F]
   ): F[ReplicatedLog[F]] =
     for {
-      lock <- Semaphore[F](1)
-    } yield new ReplicatedLog(logStorage, snapshotStorage, stateMachine, lock)
+      lock     <- Semaphore[F](1)
+      snapshot <- Ref.of[F, Option[Snapshot]](None)
+    } yield new ReplicatedLog(logStorage, snapshotStorage, stateMachine, lock, snapshot)
 }

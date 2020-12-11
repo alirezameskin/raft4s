@@ -1,14 +1,19 @@
 package raft4s.rpc.grpc.io.internal
 
-import cats.effect.{ContextShift, IO}
+import cats.effect.{ContextShift, IO, Timer}
+import com.google.protobuf
 import io.odin.Logger
 import raft4s.Address
 import raft4s.grpc.protos
 import raft4s.grpc.protos.RaftGrpc
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
+import raft4s.storage.Snapshot
+import scalapb.descriptors.ScalaType.ByteString
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.FiniteDuration
 
 private[grpc] class GRPCRaftClient(address: Address, stub: RaftGrpc.RaftStub)(implicit
   CS: ContextShift[IO],
@@ -41,7 +46,9 @@ private[grpc] class GRPCRaftClient(address: Address, stub: RaftGrpc.RaftStub)(im
     )
 
     val response =
-      stub.appendEntries(request).map(res => AppendEntriesResponse(res.nodeId, res.currentTerm, res.ack, res.success))
+      stub
+        .appendEntries(request)
+        .map(res => AppendEntriesResponse(res.nodeId, res.currentTerm, res.ack, res.success))
 
     IO
       .fromFuture(IO(response))
@@ -59,6 +66,27 @@ private[grpc] class GRPCRaftClient(address: Address, stub: RaftGrpc.RaftStub)(im
       .fromFuture(IO(response))
       .handleErrorWith { error =>
         logger.warn(s"An error in sending a command to node: ${address}. Command: ${command}, Error: ${error.getMessage}") *> IO
+          .raiseError(error)
+      }
+  }
+
+  override def send(snapshot: Snapshot, lastEntry: LogEntry): IO[AppendEntriesResponse] = {
+    val request =
+      protos.InstallSnapshotRequest(
+        snapshot.lastIndex,
+        Some(protos.LogEntry(lastEntry.term, lastEntry.index, ObjectSerializer.encode[Command[_]](lastEntry.command))),
+        protobuf.ByteString.copyFrom(snapshot.bytes.array())
+      )
+    val response = stub
+      .installSnapshot(request)
+      .map(res => AppendEntriesResponse(res.nodeId, res.currentTerm, res.ack, res.success))
+
+    IO
+      .fromFuture(IO(response))
+      .handleErrorWith { error =>
+        logger.warn(
+          s"An error in sending a snapshot to node: ${address}. Snapshot: ${snapshot}, Error: ${error.getMessage}"
+        ) *> IO
           .raiseError(error)
       }
   }

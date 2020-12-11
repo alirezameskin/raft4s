@@ -19,6 +19,8 @@ abstract class NodeState {
 
   def onReplicateLog(): List[Action]
 
+  def onSnapshotInstalled(logState: LogState): (NodeState, AppendEntriesResponse)
+
   def leader: Option[String]
 
   def toPersistedState: PersistedState

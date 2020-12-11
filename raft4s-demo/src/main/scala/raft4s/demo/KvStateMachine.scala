@@ -38,7 +38,7 @@ class KvStateMachine extends StateMachine[IO] {
     oos.writeObject(copy)
     oos.close
 
-    Snapshot(lastIndex, 0L, ByteBuffer.wrap(stream.toByteArray))
+    Snapshot(lastIndex, ByteBuffer.wrap(stream.toByteArray))
   }
 
   override def restoreSnapshot(snapshot: Snapshot): IO[Unit] = IO {

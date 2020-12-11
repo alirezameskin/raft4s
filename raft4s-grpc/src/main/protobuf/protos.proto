@@ -6,6 +6,13 @@ service Raft {
   rpc vote(VoteRequest) returns (VoteResponse) {}
   rpc appendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
   rpc execute(CommandRequest) returns (CommandResponse) {}
+  rpc installSnapshot(InstallSnapshotRequest) returns (AppendEntriesResponse) {}
+}
+
+message InstallSnapshotRequest {
+  uint64 lastIndexId = 1;
+  LogEntry lastEntry = 2;
+  bytes bytes = 3;
 }
 
 message CommandRequest {

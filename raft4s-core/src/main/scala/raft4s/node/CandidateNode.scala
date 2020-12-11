@@ -106,4 +106,7 @@ case class CandidateNode(
 
   override def toPersistedState: PersistedState =
     PersistedState(currentTerm, votedFor)
+
+  override def onSnapshotInstalled(logState: LogState): (NodeState, AppendEntriesResponse) =
+    (this, AppendEntriesResponse(nodeId, currentTerm, logState.appliedIndex.getOrElse(0), false))
 }
