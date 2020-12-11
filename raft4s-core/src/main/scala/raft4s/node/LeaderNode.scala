@@ -47,7 +47,7 @@ case class LeaderNode(
         )
       )
     else
-      (this, (AppendEntriesResponse(nodeId, currentTerm, 0, false), List.empty))
+      (this, (AppendEntriesResponse(nodeId, currentTerm, logState.length, false), List.empty))
   }
 
   override def onReceive(logState: LogState, msg: AppendEntriesResponse): (NodeState, List[Action]) =

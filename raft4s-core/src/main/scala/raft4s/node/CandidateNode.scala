@@ -23,8 +23,8 @@ case class CandidateNode(
 
     if (1 >= quorumSize) {
       val ackedLength = nodes.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
-      val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, 0L)).toMap
-      val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, 0))
+      val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
+      val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, logState.length))
 
       (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(nodeId) :: actions)
     } else {
@@ -60,8 +60,8 @@ case class CandidateNode(
       (FollowerNode(nodeId, nodes, msg.term), List(StoreState))
     else if (msg.term == currentTerm && msg.granted && votedReceived_.size >= quorumSize) {
       val ackedLength = nodes.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
-      val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, 0L)).toMap
-      val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, 0))
+      val sentLength  = nodes.filterNot(_ == nodeId).map(n => (n, logState.appliedIndex.getOrElse(0L))).toMap
+      val actions     = nodes.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, logState.length))
 
       (LeaderNode(nodeId, nodes, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(nodeId) :: actions)
 
@@ -88,7 +88,10 @@ case class CandidateNode(
     else
       (
         this.copy(currentTerm = currentTerm_),
-        (AppendEntriesResponse(nodeId, currentTerm_, 0, false), if (currentTerm == currentTerm_) List.empty else List(StoreState))
+        (
+          AppendEntriesResponse(nodeId, currentTerm_, logState.appliedIndex.getOrElse(0), false),
+          if (currentTerm == currentTerm_) List.empty else List(StoreState)
+        )
       )
   }
 

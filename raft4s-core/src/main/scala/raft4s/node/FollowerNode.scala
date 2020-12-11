@@ -73,7 +73,10 @@ case class FollowerNode(
     } else
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
-        (AppendEntriesResponse(nodeId, currentTerm_, 0, false), if (currentTerm == currentTerm_) List.empty else List(StoreState))
+        (
+          AppendEntriesResponse(nodeId, currentTerm_, logState.appliedIndex.getOrElse(0), false),
+          if (currentTerm == currentTerm_) List.empty else List(StoreState)
+        )
       )
   }
 
