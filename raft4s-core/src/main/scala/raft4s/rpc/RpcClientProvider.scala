@@ -1,17 +1,48 @@
 package raft4s.rpc
 
-import cats.Monad
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import cats.implicits._
+import cats.{Monad, MonadError}
 import io.odin.Logger
 import raft4s.Address
+import raft4s.protocol._
 
 class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   val clients: Ref[F, Map[String, RpcClient[F]]],
   val members: Seq[Address]
-) {
-  def client(serverId: String): F[RpcClient[F]] =
+)(implicit ME: MonadError[F, Throwable]) {
+
+  def send(serverId: String, voteRequest: VoteRequest): F[VoteResponse] =
+    for {
+      client  <- getClient(serverId)
+      attempt <- client.send(voteRequest).attempt
+      result  <- logErrors(serverId, attempt)
+    } yield result
+
+  def send(serverId: String, appendEntries: AppendEntries): F[AppendEntriesResponse] =
+    for {
+      client  <- getClient(serverId)
+      attempt <- client.send(appendEntries).attempt
+      result  <- logErrors(serverId, attempt)
+    } yield result
+
+  def send[T](serverId: String, command: Command[T]): F[T] =
+    for {
+      client  <- getClient(serverId)
+      attempt <- client.send(command).attempt
+      result  <- logErrors(serverId, attempt)
+    } yield result
+
+  private def logErrors[T](peerId: String, result: Either[Throwable, T]): F[T] =
+    result match {
+      case Left(error) =>
+        Logger[F].warn(s"An error during communication with ${peerId}. Error: ${error.getMessage}") *> ME.raiseError(error)
+      case Right(value) =>
+        Monad[F].pure(value)
+    }
+
+  private def getClient(serverId: String): F[RpcClient[F]] =
     for {
       maps <- clients.get
       possibleClient = maps.get(serverId)
@@ -25,6 +56,7 @@ class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
 
         }
     } yield client
+
 }
 
 object RpcClientProvider {

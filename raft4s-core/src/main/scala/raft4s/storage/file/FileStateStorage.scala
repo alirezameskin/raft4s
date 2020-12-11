@@ -1,7 +1,8 @@
 package raft4s.storage.file
 
 import cats.effect.Sync
-import raft4s.storage.{PersistedState, StateStorage}
+import raft4s.storage.StateStorage
+import raft4s.storage.internal.PersistedState
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}

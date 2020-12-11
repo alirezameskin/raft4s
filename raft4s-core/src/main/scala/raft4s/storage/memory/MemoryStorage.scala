@@ -5,5 +5,5 @@ import raft4s.storage.Storage
 
 object MemoryStorage {
   def empty[F[_]: Monad]: Storage[F] =
-    Storage[F](MemoryLogStorage.empty[F], MemoryStateStorage.empty[F])
+    Storage[F](MemoryLogStorage.empty[F], MemoryStateStorage.empty[F], MemorySnapshotStorage.empty[F])
 }

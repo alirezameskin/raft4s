@@ -26,6 +26,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   def start(): F[String] =
     for {
+      _      <- log.initialize()
       _      <- logger.info("Cluster is starting")
       server <- RpcServerBuilder[F].build(config.local, this)
       _      <- server.start()
@@ -135,8 +136,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
           _        <- logger.trace("Read command has to be ran on the leader node")
           leader   <- leaderAnnouncer.listen()
           _        <- logger.trace(s"The current leader is ${leader}")
-          client   <- clientProvider.client(leader)
-          response <- client.send(command)
+          response <- clientProvider.send(leader, command)
           _        <- logger.trace("Response for the read command received from the leader")
         } yield response
     }
@@ -161,8 +161,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
           _        <- logger.trace("Write commands should be forwarded to the leader node.")
           leader   <- leaderAnnouncer.listen()
           _        <- logger.trace(s"The current leader is ${leader}.")
-          client   <- clientProvider.client(leader)
-          response <- client.send(command)
+          response <- clientProvider.send(leader, command)
           _        <- logger.trace("Response for the write command received from the leader")
           _        <- deferred.complete(response)
         } yield List.empty
@@ -176,30 +175,19 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       case RequestForVote(peerId, request) =>
         Concurrent[F].start {
           for {
-            _      <- logger.trace(s"Sending a vote request to ${peerId}. Request: ${request}")
-            client <- clientProvider.client(peerId)
-            result <- client.send(request).attempt
-            output <- result match {
-              case Left(error) => Logger[F].warn(s"An error during sending VoteRequest to ${peerId}. Error : ${error.getMessage}")
-              case Right(response) =>
-                this.onReceive(response)
-            }
-          } yield output
+            _        <- logger.trace(s"Sending a vote request to ${peerId}. Request: ${request}")
+            response <- clientProvider.send(peerId, request)
+            _        <- this.onReceive(response)
+          } yield response
         } *> Monad[F].unit
 
       case ReplicateLog(peerId, term, sentLength) =>
         Concurrent[F].start {
           for {
-            _      <- logger.trace(s"Sending AppendEntries request to to ${peerId}. Term: ${term}")
-            append <- log.getAppendEntries(config.nodeId, term, sentLength)
-            client <- clientProvider.client(peerId)
-            result <- client.send(append).attempt
-            _ <- result match {
-              case Left(error) =>
-                Logger[F].warn(s"An error during replicating logs to ${peerId}. Error: ${error.getMessage}")
-              case Right(response) =>
-                this.onReceive(response)
-            }
+            _        <- logger.trace(s"Sending AppendEntries request to to ${peerId}. Term: ${term}, sentLength : ${sentLength}")
+            append   <- log.getAppendEntries(config.nodeId, term, sentLength)
+            response <- clientProvider.send(peerId, append)
+            _        <- this.onReceive(response)
           } yield ()
         } *> Monad[F].unit
 
@@ -274,8 +262,8 @@ object Raft {
       nodeState <- Ref.of[F, NodeState](
         FollowerNode(config.nodeId, config.nodes, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
       )
-      heartbeat <- Ref.of[F, Long](0L)
-      replicateLog = ReplicatedLog.build[F](storage.logStorage, stateMachine)
+      heartbeat    <- Ref.of[F, Long](0L)
+      replicateLog <- ReplicatedLog.build[F](storage.logStorage, storage.snapshotStorage, stateMachine)
 
     } yield new Raft[F](config, clientProvider, leaderAnnouncer, replicateLog, storage, nodeState, heartbeat)
 }
