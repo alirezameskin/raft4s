@@ -5,7 +5,7 @@ import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
-import raft4s.log.ReplicatedLog
+import raft4s.log.{LogReplicator, ReplicatedLog}
 import raft4s.node._
 import raft4s.protocol._
 import raft4s.rpc._
@@ -15,13 +15,14 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
 class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
-  val config: Configuration,
-  val clientProvider: RpcClientProvider[F],
-  val leaderAnnouncer: LeaderAnnouncer[F],
-  val log: ReplicatedLog[F],
-  val storage: Storage[F],
-  val state: Ref[F, NodeState],
-  val lastHeartbeat: Ref[F, Long]
+  config: Configuration,
+  clientProvider: RpcClientProvider[F],
+  leaderAnnouncer: LeaderAnnouncer[F],
+  logReplicator: LogReplicator[F],
+  log: ReplicatedLog[F],
+  storage: Storage[F],
+  state: Ref[F, NodeState],
+  lastHeartbeat: Ref[F, Long]
 )(implicit ME: MonadError[F, Throwable], logger: Logger[F]) {
 
   def start(): F[String] =
@@ -123,19 +124,14 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
     node match {
       case _: LeaderNode =>
         for {
-          _ <- logger.trace("Current node is the leader, it is running the read command")
-          res <-
-            if (log.stateMachine.applyRead.isDefinedAt(command)) log.stateMachine.applyRead(command).asInstanceOf[F[T]]
-            else ME.raiseError(new RuntimeException("Can not run the command"))
+          _   <- logger.trace("Current node is the leader, it is running the read command")
+          res <- log.applyReadCommand(command)
         } yield res
 
       case _: FollowerNode if config.followerAcceptRead =>
         for {
-          _ <- logger.trace("Current node is a follower, it is running the read command")
-          res <-
-            if (log.stateMachine.applyRead.isDefinedAt(command))
-              log.stateMachine.applyRead(command).asInstanceOf[F[T]]
-            else ME.raiseError(new RuntimeException("Can not run the command"))
+          _   <- logger.trace("Current node is a follower, it is running the read command")
+          res <- log.applyReadCommand(command)
         } yield res
 
       case _ =>
@@ -180,23 +176,28 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
   private def runAction(action: Action): F[Unit] =
     action match {
       case RequestForVote(peerId, request) =>
-        Concurrent[F].start {
+        background {
           for {
             _        <- logger.trace(s"Sending a vote request to ${peerId}. Request: ${request}")
             response <- clientProvider.send(peerId, request)
             _        <- this.onReceive(response)
           } yield response
-        } *> Monad[F].unit
+        }
 
       case ReplicateLog(peerId, term, sentLength) =>
-        Concurrent[F].start {
+        background {
           for {
-            _        <- logger.trace(s"Sending AppendEntries request to to ${peerId}. Term: ${term}, sentLength : ${sentLength}")
-            append   <- log.getAppendEntries(config.nodeId, term, sentLength)
-            response <- clientProvider.send(peerId, append)
+            response <- logReplicator.replicatedLogs(peerId, term, sentLength)
             _        <- this.onReceive(response)
           } yield ()
-        } *> Monad[F].unit
+        }
+
+      case StoreState =>
+        for {
+          _    <- logger.trace("Storing the new state in the storage")
+          node <- state.get
+          _    <- storage.stateStorage.persistState(node.toPersistedState)
+        } yield ()
 
       case CommitLogs(ackedLength, minAckes) =>
         log.commitLogs(ackedLength, minAckes)
@@ -210,24 +211,6 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       case ResetLeaderAnnouncer =>
         leaderAnnouncer.reset()
 
-      case StoreState =>
-        for {
-          _    <- logger.trace("Storing the new state in the storage")
-          node <- state.get
-          _    <- storage.stateStorage.persistState(node.toPersistedState)
-        } yield ()
-
-      case SendSnapshot(peerId, snapshot) =>
-        for {
-          _        <- logger.trace(s"Installing an Snapshot for peer ${peerId}, snapshot: ${snapshot}")
-          logEntry <- log.logStorage.get(snapshot.lastIndex)
-          response <- clientProvider.send(peerId, snapshot, logEntry)
-          _        <- logger.trace(s"Response after installing snapshot ${response}")
-          logState <- log.state
-          actions  <- state.modify(_.onReceive(logState, response))
-          _        <- logger.trace(s"Logger after sending snapshot ${actions}")
-          _        <- runActions(actions)
-        } yield ()
     }
 
   private def runElection(): F[Unit] =
@@ -245,7 +228,9 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       _ <- runActions(actions)
     } yield ()
 
-    Concurrent[F].start(Monad[F].foreverM(scheduled)) *> Monad[F].unit
+    background {
+      Monad[F].foreverM(scheduled)
+    }
   }
 
   private def scheduleElection(): F[Unit] = {
@@ -257,15 +242,21 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
       _    <- if (!node.isInstanceOf[LeaderNode] && now - lh > config.heartbeatTimeoutMillis) runElection() else Monad[F].unit
     } yield ()
 
-    Concurrent[F].start(Monad[F].foreverM(scheduled)) *> Monad[F].unit
+    background {
+      Monad[F].foreverM(scheduled)
+    }
   }
 
-  private def electionDelay(): F[FiniteDuration] = Sync[F].delay {
-    val delay =
-      config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis)
+  private def background[A](fa: F[A]): F[Unit] =
+    Concurrent[F].start(fa) *> Monad[F].unit
 
-    FiniteDuration(delay, TimeUnit.MILLISECONDS)
-  }
+  private def electionDelay(): F[FiniteDuration] =
+    Sync[F].delay {
+      val delay =
+        config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis)
+
+      FiniteDuration(delay, TimeUnit.MILLISECONDS)
+    }
 }
 
 object Raft {
@@ -281,8 +272,9 @@ object Raft {
       nodeState <- Ref.of[F, NodeState](
         FollowerNode(config.nodeId, config.nodes, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
       )
-      heartbeat    <- Ref.of[F, Long](0L)
-      replicateLog <- ReplicatedLog.build[F](storage.logStorage, storage.snapshotStorage, stateMachine)
+      heartbeat     <- Ref.of[F, Long](0L)
+      replicateLog  <- ReplicatedLog.build[F](storage.logStorage, storage.snapshotStorage, stateMachine)
+      logReplicator <- LogReplicator.build[F](config.nodeId, clientProvider, replicateLog)
 
-    } yield new Raft[F](config, clientProvider, leaderAnnouncer, replicateLog, storage, nodeState, heartbeat)
+    } yield new Raft[F](config, clientProvider, leaderAnnouncer, logReplicator, replicateLog, storage, nodeState, heartbeat)
 }

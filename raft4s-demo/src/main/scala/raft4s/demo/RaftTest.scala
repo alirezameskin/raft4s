@@ -42,14 +42,14 @@ object RaftTest extends App {
     })
   }
 
-  val nodes = List("node1", "node2", "node3")
-  val node1 = createNode("node1", nodes)
-  val node2 = createNode("node2", nodes)
-  val node3 = createNode("node3", nodes)
+  val nodes                  = List("node1", "node2", "node3")
+  val (node1, stateMachine1) = createNode("node1", nodes)
+  val (node2, stateMachine2) = createNode("node2", nodes)
+  val (node3, stateMachine3) = createNode("node3", nodes)
 
-  val client1 = createClient(node1)
-  val client2 = createClient(node2)
-  val client3 = createClient(node3)
+  val client1 = createClient(node1, "node1")
+  val client2 = createClient(node2, "node2")
+  val client3 = createClient(node3, "node3")
 
   clients.put("node1:8090", client1)
   clients.put("node2:8090", client2)
@@ -86,38 +86,39 @@ object RaftTest extends App {
 
   result.unsafeRunSync()
 
-  scala.Predef.ensuring(node2.log.stateMachine.applyRead(Get("name")).unsafeRunSync() == "Alireza")
-  scala.Predef.ensuring(node3.log.stateMachine.applyRead(Get("name")).unsafeRunSync() == "Alireza")
+  scala.Predef.ensuring(stateMachine2.applyRead(Get("name")).unsafeRunSync() == "Alireza")
+  scala.Predef.ensuring(stateMachine3.applyRead(Get("name")).unsafeRunSync() == "Alireza")
 
-  scala.Predef.ensuring(node2.log.stateMachine.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
-  scala.Predef.ensuring(node2.log.stateMachine.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
+  scala.Predef.ensuring(stateMachine2.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
+  scala.Predef.ensuring(stateMachine3.applyRead(Get("lastname")).unsafeRunSync() == "Meskin")
 
-  def createNode(nodeId: String, nodes: List[String]): Raft[IO] = {
+  def createNode(nodeId: String, nodes: List[String]): (Raft[IO], KvStateMachine) = {
     val configuration = Configuration(
       local = Address(nodeId, 8090),
       members = nodes.map(id => Address(id, 8090)),
       followerAcceptRead = false
     )
 
-    val node = Raft.make[IO](configuration, MemoryStorage.empty[IO], new KvStateMachine())
-    node.unsafeRunSync()
+    val stateMachine = new KvStateMachine()
+    val node         = Raft.make[IO](configuration, MemoryStorage.empty[IO], stateMachine)
+    (node.unsafeRunSync(), stateMachine)
   }
 
-  def createClient(node: Raft[IO]): RpcClient[IO] =
+  def createClient(node: Raft[IO], nodeId: String): RpcClient[IO] =
     new RpcClient[IO] {
       override def send(voteRequest: VoteRequest): IO[VoteResponse] =
-        IO(println(s"vote request received ${voteRequest} on node ${node.config.local.id}")) *> node.onReceive(voteRequest)
+        IO(println(s"vote request received ${voteRequest} on node ${nodeId}")) *> node.onReceive(voteRequest)
 
       override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
-        IO(println(s"Append entries request received ${appendEntries} on node ${node.config.local.id}")) *> node.onReceive(
+        IO(println(s"Append entries request received ${appendEntries} on node ${nodeId}")) *> node.onReceive(
           appendEntries
         )
 
       override def send[T](command: Command[T]): IO[T] =
-        IO(println(s"Sending a command to node ${node.config.local.id}")) *> node.onCommand(command)
+        IO(println(s"Sending a command to node ${nodeId}")) *> node.onCommand(command)
 
       override def send(snapshot: Snapshot, lastEntry: LogEntry): IO[AppendEntriesResponse] =
-        IO(println(s"Sending an snapshot to node ${node.config.local.id}")) *> node.onReceive(
+        IO(println(s"Sending an snapshot to node ${nodeId}")) *> node.onReceive(
           InstallSnapshot(snapshot, lastEntry)
         )
     }

@@ -29,10 +29,6 @@ object RaftTestSingleNode extends App {
     node <- Raft.make[IO](config, MemoryStorage.empty[IO], new KvStateMachine())
     _    <- node.start()
 
-    s <- node.state.get
-    _ = println("Node 1", s)
-    _ = println("Sending a new command")
-
     res <- node.onCommand(Put("name", "Reza"))
     _ = println(s"Command output : ${res}")
 

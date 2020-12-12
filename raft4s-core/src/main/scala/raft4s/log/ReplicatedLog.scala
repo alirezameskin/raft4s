@@ -12,11 +12,11 @@ import raft4s.storage.{LogStorage, Snapshot, SnapshotStorage}
 import scala.collection.concurrent.TrieMap
 
 class ReplicatedLog[F[_]: Monad: Logger](
-  val logStorage: LogStorage[F],
-  val snapshotStorage: SnapshotStorage[F],
-  val stateMachine: StateMachine[F],
-  val semaphore: Semaphore[F],
-  val latestSnapshot: Ref[F, Option[Snapshot]]
+  logStorage: LogStorage[F],
+  snapshotStorage: SnapshotStorage[F],
+  stateMachine: StateMachine[F],
+  semaphore: Semaphore[F],
+  latestSnapshot: Ref[F, Option[Snapshot]]
 )(implicit ME: MonadError[F, Throwable]) {
 
   private val deferreds = TrieMap[Long, Deferred[F, Any]]()
@@ -62,8 +62,7 @@ class ReplicatedLog[F[_]: Monad: Logger](
       length       <- logStorage.length
       term         <- if (length > 0) logStorage.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
       appliedIndex <- stateMachine.appliedIndex
-      snapshot     <- latestSnapshot.get
-    } yield LogState(length, term, Some(appliedIndex), snapshot)
+    } yield LogState(length, term, Some(appliedIndex))
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
     for {
@@ -96,6 +95,19 @@ class ReplicatedLog[F[_]: Monad: Logger](
       } yield ()
     }
   }
+
+  def applyReadCommand[T](command: ReadCommand[T]): F[T] =
+    for {
+      res <-
+        if (stateMachine.applyRead.isDefinedAt(command)) stateMachine.applyRead(command).asInstanceOf[F[T]]
+        else ME.raiseError(new RuntimeException("Can not run the command"))
+    } yield res
+
+  def get(index: Long): F[LogEntry] =
+    logStorage.get(index)
+
+  def getLatestSnapshot(): F[Option[Snapshot]] =
+    latestSnapshot.get
 
   private def truncateInconsistentLogs(entries: List[LogEntry], logLength: Long, leaderLogSent: Long): F[Unit] =
     if (entries.nonEmpty && logLength > leaderLogSent) {

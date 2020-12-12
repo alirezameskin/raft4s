@@ -23,9 +23,6 @@ object Test extends IOApp {
       node <- Raft.make[IO](config1, MemoryStorage.empty[IO], new KvStateMachine())
       _    <- node.start()
 
-      s <- node.state.get
-      _ = println("Node 1 : ", s)
-
       res <- node.onCommand(Get("name"))
       _ = println(s"Result in node 1 : ${res}")
     } yield ()
@@ -39,9 +36,6 @@ object Test extends IOApp {
       node <- Raft.make[IO](config2, MemoryStorage.empty[IO], new KvStateMachine())
       _    <- node.start()
 
-      s <- node.state.get
-      _ = println("Node 2", s)
-
       res <- node.onCommand(Put("name", "Alireza"))
       _ = println(res)
     } yield ()
@@ -54,9 +48,6 @@ object Test extends IOApp {
     val result3 = for {
       node <- Raft.make[IO](config3, MemoryStorage.empty[IO], new KvStateMachine())
       _    <- node.start()
-
-      s <- node.state.get
-      _ = println("Node 3", s)
 
       res <- node.onCommand(Get("name"))
       _ = println(s"Result in node 3 ${res}")

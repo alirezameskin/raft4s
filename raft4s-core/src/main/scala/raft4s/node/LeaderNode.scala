@@ -3,7 +3,7 @@ package raft4s.node
 import raft4s.log.LogState
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.storage.internal.PersistedState
-import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog, SendSnapshot, StoreState}
+import raft4s.{Action, AnnounceLeader, CommitLogs, ReplicateLog, StoreState}
 
 case class LeaderNode(
   nodeId: String,
@@ -26,8 +26,16 @@ case class LeaderNode(
         FollowerNode(nodeId, nodes, msg.currentTerm, Some(msg.nodeId)),
         (VoteResponse(nodeId, msg.currentTerm, true), List(StoreState))
       )
-    else
-      (this, (VoteResponse(nodeId, msg.currentTerm, false), List.empty))
+    else {
+
+      val sentLength_  = sentLength + (msg.nodeId  -> msg.logLength)
+      val ackedLength_ = ackedLength + (msg.nodeId -> msg.logLength)
+
+      (
+        this.copy(sentLength = sentLength_, ackedLength = ackedLength_),
+        (VoteResponse(nodeId, currentTerm, false), List(ReplicateLog(msg.nodeId, currentTerm, msg.logLength)))
+      )
+    }
   }
 
   override def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action]) =
@@ -60,12 +68,6 @@ case class LeaderNode(
           this.copy(ackedLength = ackedLength_, sentLength = sentLength_),
           List(CommitLogs(ackedLength_ + (nodeId -> logState.length), (nodes.size + 1) / 2))
         )
-
-      } else if (logState.snapshot.isDefined && msg.ack < logState.snapshot.map(_.lastIndex).getOrElse(0L)) {
-        val sentLength_ = sentLength + (msg.nodeId -> logState.snapshot.map(_.lastIndex).getOrElse(0L))
-        val actions     = List(SendSnapshot(msg.nodeId, logState.snapshot.get))
-
-        (this.copy(sentLength = sentLength_), actions)
 
       } else if (sentLength(msg.nodeId) > 0) {
         val sentLength_ = sentLength + (msg.nodeId -> (sentLength(msg.nodeId) - 1))
