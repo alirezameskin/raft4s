@@ -1,6 +1,6 @@
 package raft4s.demo
 
-import cats.effect.{ContextShift, IO, Timer}
+import cats.effect.{ContextShift, IO, Resource, Timer}
 import io.odin
 import io.odin.Logger
 import raft4s._
@@ -18,16 +18,18 @@ object RaftTestSingleNode extends App {
   }
 
   implicit val serverBuilder = new RpcServerBuilder[IO] {
-    override def build(address: Address, raft: Raft[IO]): IO[RpcServer[IO]] = IO(new RpcServer[IO] {
-      override def start(): IO[Unit] = IO.unit
-    })
+    override def build(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] =
+      Resource.pure[IO, RpcServer[IO]](new RpcServer[IO] {
+        override def start(): IO[Unit] = IO.unit
+      })
   }
 
   val config = Configuration(Address("node1", 8090), List.empty)
 
   val result = for {
-    node <- Raft.make[IO](config, MemoryStorage.empty[IO], new KvStateMachine())
-    _    <- node.start()
+    storage <- MemoryStorage.empty[IO]
+    node    <- Raft.make[IO](config, storage, new KvStateMachine())
+    _       <- node.start()
 
     res <- node.onCommand(Put("name", "Reza"))
     _ = println(s"Command output : ${res}")

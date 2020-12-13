@@ -20,8 +20,9 @@ object Test extends IOApp {
     import raft4s.rpc.grpc.io.implicits._
 
     val result1 = for {
-      node <- Raft.make[IO](config1, MemoryStorage.empty[IO], new KvStateMachine())
-      _    <- node.start()
+      storage <- MemoryStorage.empty[IO]
+      node    <- Raft.make[IO](config1, storage, new KvStateMachine())
+      _       <- node.start()
 
       res <- node.onCommand(Get("name"))
       _ = println(s"Result in node 1 : ${res}")
@@ -33,8 +34,9 @@ object Test extends IOApp {
         List(Address("localhost", 9080), Address("localhost", 9082))
       )
     val result2 = for {
-      node <- Raft.make[IO](config2, MemoryStorage.empty[IO], new KvStateMachine())
-      _    <- node.start()
+      storage <- MemoryStorage.empty[IO]
+      node    <- Raft.make[IO](config2, storage, new KvStateMachine())
+      _       <- node.start()
 
       res <- node.onCommand(Put("name", "Alireza"))
       _ = println(res)
@@ -46,8 +48,9 @@ object Test extends IOApp {
         List(Address("localhost", 9080), Address("localhost", 9081))
       )
     val result3 = for {
-      node <- Raft.make[IO](config3, MemoryStorage.empty[IO], new KvStateMachine())
-      _    <- node.start()
+      storage <- MemoryStorage.empty[IO]
+      node    <- Raft.make[IO](config3, storage, new KvStateMachine())
+      _       <- node.start()
 
       res <- node.onCommand(Get("name"))
       _ = println(s"Result in node 3 ${res}")

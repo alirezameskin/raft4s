@@ -5,7 +5,8 @@ import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
-import raft4s.log.{LogReplicator, ReplicatedLog}
+import raft4s.helpers.ErrorLogging
+import raft4s.log.{Log, LogReplicator}
 import raft4s.node._
 import raft4s.protocol._
 import raft4s.rpc._
@@ -19,105 +20,119 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
   clientProvider: RpcClientProvider[F],
   leaderAnnouncer: LeaderAnnouncer[F],
   logReplicator: LogReplicator[F],
-  log: ReplicatedLog[F],
+  log: Log[F],
   storage: Storage[F],
   state: Ref[F, NodeState],
   lastHeartbeat: Ref[F, Long]
-)(implicit ME: MonadError[F, Throwable], logger: Logger[F]) {
+)(implicit ME: MonadError[F, Throwable], logger: Logger[F])
+    extends ErrorLogging[F] {
 
   def start(): F[String] =
-    for {
-      _      <- log.initialize()
-      _      <- logger.info("Cluster is starting")
-      server <- RpcServerBuilder[F].build(config.local, this)
-      _      <- server.start()
-      _      <- logger.debug("RPC server started")
-      delay  <- electionDelay()
-      _      <- logger.trace(s"Delay to start the election ${delay}")
-      _      <- Timer[F].sleep(delay)
-      node   <- state.get
-      _      <- if (node.leader.isDefined) Monad[F].unit else runElection()
-      _      <- scheduleElection()
-      _      <- scheduleReplication()
-      _      <- logger.trace("Waiting for the leader to be elected.")
-      leader <- leaderAnnouncer.listen()
-      _      <- logger.info(s"A Leader is elected. Leader: '${leader}'")
-    } yield leader
+    errorLogging("Starting Cluster") {
+      for {
+        _      <- logger.info("Cluster is starting")
+        _      <- log.initialize()
+        server <- RpcServerBuilder[F].build(config.local, this)
+        _      <- server.start()
+        _      <- putInitialDelay()
+        node   <- state.get
+        _      <- if (node.leader.isDefined) Monad[F].unit else runElection()
+        _      <- scheduleElection()
+        _      <- scheduleReplication()
+        _      <- logger.trace("Waiting for the leader to be elected.")
+        leader <- leaderAnnouncer.listen()
+        _      <- logger.info(s"A Leader is elected. Leader: '${leader}'")
+      } yield leader
+    }
 
   def listen(): F[String] =
-    leaderAnnouncer.listen()
+    errorLogging("Waiting for the Leader to be elected") {
+      leaderAnnouncer.listen()
+    }
 
   def onReceive(msg: VoteRequest): F[VoteResponse] =
-    for {
-      _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
-      logState <- log.state
-      result   <- state.modify(_.onReceive(logState, msg))
+    errorLogging("Receiving VoteRequest") {
+      for {
+        _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
+        logState <- log.state
+        result   <- state.modify(_.onReceive(logState, msg))
 
-      (response, actions) = result
+        (response, actions) = result
 
-      _ <- runActions(actions)
-      _ <- logger.trace(s"Vote response to the request ${response}")
-    } yield response
+        _ <- runActions(actions)
+        _ <- logger.trace(s"Vote response to the request ${response}")
+      } yield response
+    }
 
   def onReceive(msg: VoteResponse): F[Unit] =
-    for {
-      _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
-      logState <- log.state
-      actions  <- state.modify(_.onReceive(logState, msg))
-      _        <- runActions(actions)
-    } yield ()
+    errorLogging("Receiving VoteResponse") {
+      for {
+        _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
+        logState <- log.state
+        actions  <- state.modify(_.onReceive(logState, msg))
+        _        <- runActions(actions)
+      } yield ()
+    }
 
   def onReceive(msg: AppendEntries): F[AppendEntriesResponse] =
-    for {
-      _        <- logger.trace(s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}")
-      logState <- log.state
-      current  <- state.get
-      time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-      _        <- lastHeartbeat.set(time)
+    errorLogging(s"Receiving an AppendEntries ${msg}") {
+      for {
+        _        <- logger.trace(s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}")
+        logState <- log.state
+        current  <- state.get
+        time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
+        _        <- lastHeartbeat.set(time)
 
-      (nextState, (response, actions)) = current.onReceive(logState, msg)
+        (nextState, (response, actions)) = current.onReceive(logState, msg)
 
-      _ <- runActions(actions)
-      _ <-
-        if (response.success)
-          log.appendEntries(msg.entries, msg.logLength, msg.leaderAppliedIndex) *> state.set(nextState)
-        else
-          Monad[F].unit
-    } yield response
+        _ <- runActions(actions)
+        _ <-
+          if (response.success)
+            log.appendEntries(msg.entries, msg.logLength, msg.leaderAppliedIndex) *> state.set(nextState)
+          else
+            Monad[F].unit
+      } yield response
+    }
 
   def onReceive(msg: AppendEntriesResponse): F[Unit] =
-    for {
-      _        <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
-      logState <- log.state
-      actions  <- state.modify(_.onReceive(logState, msg))
-      _        <- runActions(actions)
-    } yield ()
+    errorLogging("Receiving AppendEntrriesResponse") {
+      for {
+        _        <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
+        logState <- log.state
+        actions  <- state.modify(_.onReceive(logState, msg))
+        _        <- runActions(actions)
+      } yield ()
+    }
 
   def onReceive(msg: InstallSnapshot): F[AppendEntriesResponse] =
-    for {
-      _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
-      logState <- log.state
-      response <- state.modify(_.onSnapshotInstalled(logState))
-    } yield response
+    errorLogging("Receiving InstallSnapshot") {
+      for {
+        _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
+        logState <- log.state
+        response <- state.modify(_.onSnapshotInstalled(logState))
+      } yield response
+    }
 
   def onCommand[T](command: Command[T]): F[T] =
-    command match {
-      case command: ReadCommand[_] =>
-        for {
-          _      <- logger.trace(s"A read comment received ${command}")
-          state_ <- state.get
-          result <- onReadCommand(state_, command)
-        } yield result
+    errorLogging("Receiving Command") {
+      command match {
+        case command: ReadCommand[_] =>
+          for {
+            _      <- logger.trace(s"A read comment received ${command}")
+            state_ <- state.get
+            result <- onReadCommand(state_, command)
+          } yield result
 
-      case command: WriteCommand[_] =>
-        for {
-          _        <- logger.trace(s"A write comment received ${command}")
-          deferred <- Deferred[F, T]
-          state_   <- state.get
-          actions  <- onWriteCommand(state_, command, deferred)
-          _        <- runActions(actions)
-          result   <- deferred.get
-        } yield result
+        case command: WriteCommand[_] =>
+          for {
+            _        <- logger.trace(s"A write comment received ${command}")
+            deferred <- Deferred[F, T]
+            state_   <- state.get
+            actions  <- onWriteCommand(state_, command, deferred)
+            _        <- runActions(actions)
+            result   <- deferred.get
+          } yield result
+      }
     }
 
   private def onReadCommand[T](node: NodeState, command: ReadCommand[T]): F[T] =
@@ -250,13 +265,16 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
   private def background[A](fa: F[A]): F[Unit] =
     Concurrent[F].start(fa) *> Monad[F].unit
 
-  private def electionDelay(): F[FiniteDuration] =
-    Sync[F].delay {
-      val delay =
-        config.electionMinDelayMillis + scala.util.Random.nextInt(config.electionMaxDelayMillis - config.electionMinDelayMillis)
+  private def putInitialDelay(): F[Unit] =
+    for {
+      millis <- random(config.electionMinDelayMillis, config.electionMaxDelayMillis)
+      delay  <- Sync[F].delay(FiniteDuration(millis, TimeUnit.MILLISECONDS))
+      _      <- logger.trace(s"Delay to start the election ${delay}")
+      _      <- Timer[F].sleep(delay)
+    } yield ()
 
-      FiniteDuration(delay, TimeUnit.MILLISECONDS)
-    }
+  private def random(min: Int, max: Int): F[Int] =
+    Sync[F].delay(min + scala.util.Random.nextInt(max - min))
 }
 
 object Raft {
@@ -273,7 +291,7 @@ object Raft {
         FollowerNode(config.nodeId, config.nodes, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
       )
       heartbeat     <- Ref.of[F, Long](0L)
-      replicateLog  <- ReplicatedLog.build[F](storage.logStorage, storage.snapshotStorage, stateMachine)
+      replicateLog  <- Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine)
       logReplicator <- LogReplicator.build[F](config.nodeId, clientProvider, replicateLog)
 
     } yield new Raft[F](config, clientProvider, leaderAnnouncer, logReplicator, replicateLog, storage, nodeState, heartbeat)

@@ -102,7 +102,8 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
       ackedLength = Map("node2" -> 100, "node3" -> 100)
     )
 
-    val expectedActions = List(StoreState, AnnounceLeader("node1"), ReplicateLog("node2", 10, 0), ReplicateLog("node3", 10, 0))
+    val expectedActions =
+      List(StoreState, AnnounceLeader("node1"), ReplicateLog("node2", 10, 100), ReplicateLog("node3", 10, 100))
 
     node.onReceive(logState, VoteResponse("node2", 10, true)) shouldBe (expectedState, expectedActions)
   }

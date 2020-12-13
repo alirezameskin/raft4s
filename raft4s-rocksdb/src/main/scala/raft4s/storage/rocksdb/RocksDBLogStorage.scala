@@ -5,6 +5,7 @@ import cats.implicits._
 import io.odin.Logger
 import org.rocksdb.Options
 import org.{rocksdb => jrocks}
+import raft4s.helpers.ErrorLogging
 import raft4s.protocol.LogEntry
 import raft4s.storage.LogStorage
 import raft4s.storage.rocksdb.serializer.{LongSerializer, ObjectSerializer}
@@ -12,41 +13,49 @@ import raft4s.storage.rocksdb.serializer.{LongSerializer, ObjectSerializer}
 import java.nio.file.Path
 import scala.util.Try
 
-class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStorage[F] {
+class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStorage[F] with ErrorLogging[F] {
 
   override def length: F[Long] =
-    Sync[F].delay {
-      val iterator = db.newIterator()
-      iterator.seekToLast()
+    errorLogging("Fetching the log length") {
+      Sync[F].delay {
+        val iterator = db.newIterator()
+        iterator.seekToLast()
 
-      if (iterator.isValid) {
-        val bytes    = iterator.value()
-        val logEntry = ObjectSerializer.decode[LogEntry](bytes)
-        logEntry.index + 1
-      } else {
-        0
+        if (iterator.isValid) {
+          val bytes    = iterator.value()
+          val logEntry = ObjectSerializer.decode[LogEntry](bytes)
+          logEntry.index + 1
+        } else {
+          0
+        }
       }
     }
 
   override def get(index: Long): F[LogEntry] =
-    Sync[F].delay {
-      val bytes = db.get(LongSerializer.toBytes(index))
-      Option(bytes).map(ObjectSerializer.decode[LogEntry]).orNull
+    errorLogging(s"Fetching a LogEntry at index ${index}") {
+      Sync[F].delay {
+        val bytes = db.get(LongSerializer.toBytes(index))
+        Option(bytes).map(ObjectSerializer.decode[LogEntry]).orNull
+      }
     }
 
   override def put(index: Long, logEntry: LogEntry): F[LogEntry] =
-    Sync[F].delay {
-      val bytes = ObjectSerializer.encode(logEntry)
-      val key   = LongSerializer.toBytes(index)
+    errorLogging(s"Putting a LogEntry at index ${index}") {
+      Sync[F].delay {
+        val bytes = ObjectSerializer.encode(logEntry)
+        val key   = LongSerializer.toBytes(index)
 
-      db.put(key, bytes)
+        db.put(key, bytes)
 
-      logEntry
+        logEntry
+      }
     }
 
   override def delete(index: Long): F[Unit] =
-    Sync[F].delay {
-      db.delete(LongSerializer.toBytes(index))
+    errorLogging(s"Deleting a LogEntry at index ${index}") {
+      Sync[F].delay {
+        db.delete(LongSerializer.toBytes(index))
+      }
     }
 }
 

@@ -1,6 +1,8 @@
 package raft4s.storage.file
 
 import cats.effect.Sync
+import io.odin.Logger
+import raft4s.helpers.ErrorLogging
 import raft4s.storage.StateStorage
 import raft4s.storage.internal.PersistedState
 
@@ -9,27 +11,33 @@ import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
-class FileStateStorage[F[_]: Sync](path: Path) extends StateStorage[F] {
+class FileStateStorage[F[_]: Sync: Logger](path: Path) extends StateStorage[F] with ErrorLogging[F] {
 
   override def persistState(state: PersistedState): F[Unit] =
-    Sync[F].delay {
-      val content = List(state.term.toString, state.votedFor.getOrElse(""))
+    errorLogging("Error in Persisting State") {
+      Sync[F].delay {
+        val content = List(state.term.toString, state.votedFor.getOrElse(""))
 
-      Files.write(path, content.asJava, StandardCharsets.UTF_8)
+        Files.write(path, content.asJava, StandardCharsets.UTF_8)
+        ()
+      }
     }
 
   override def retrieveState(): F[Option[PersistedState]] =
-    Sync[F].delay {
-      val state = for {
-        lines <- Try(Files.readAllLines(path, StandardCharsets.UTF_8).asScala)
-        term  <- Try(lines.head.toLong)
-        voted <- Try(lines.tail.headOption)
-      } yield PersistedState(term, voted)
+    errorLogging("Error in retrieving state from File") {
+      Sync[F].delay {
+        val state = for {
+          lines <- Try(Files.readAllLines(path, StandardCharsets.UTF_8).asScala)
+          term  <- Try(lines.head.toLong)
+          voted <- Try(lines.tail.headOption)
+        } yield PersistedState(term, voted)
 
-      state.toOption
+        state.toOption
+      }
     }
+
 }
 
 object FileStateStorage {
-  def open[F[_]: Sync](path: Path) = new FileStateStorage[F](path)
+  def open[F[_]: Sync: Logger](path: Path) = new FileStateStorage[F](path)
 }

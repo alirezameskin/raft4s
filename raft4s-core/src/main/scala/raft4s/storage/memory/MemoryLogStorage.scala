@@ -29,5 +29,6 @@ class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
 }
 
 object MemoryLogStorage {
-  def empty[F[_]: Monad] = new MemoryLogStorage[F]
+  def empty[F[_]: Monad]: F[MemoryLogStorage[F]] =
+    Monad[F].pure(new MemoryLogStorage[F])
 }

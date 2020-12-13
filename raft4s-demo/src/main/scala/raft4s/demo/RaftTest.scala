@@ -1,6 +1,6 @@
 package raft4s.demo
 
-import cats.effect.{ContextShift, IO, Timer}
+import cats.effect.{ContextShift, IO, Resource, Timer}
 import io.odin
 import io.odin.Logger
 import raft4s.protocol._
@@ -21,25 +21,29 @@ object RaftTest extends App {
   val clients = scala.collection.mutable.Map.empty[String, RpcClient[IO]]
 
   implicit val clientBuilder = new RpcClientBuilder[IO] {
-    override def build(address: Address): RpcClient[IO] = new RpcClient[IO] {
-      override def send(voteRequest: VoteRequest): IO[VoteResponse] =
-        clients(address.id).send(voteRequest)
+    override def build(address: Address): RpcClient[IO] =
+      new RpcClient[IO] {
+        override def send(voteRequest: VoteRequest): IO[VoteResponse] =
+          clients(address.id).send(voteRequest)
 
-      override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
-        clients(address.id).send(appendEntries)
+        override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] =
+          clients(address.id).send(appendEntries)
 
-      override def send[T](command: Command[T]): IO[T] =
-        clients(address.id).send(command)
+        override def send[T](command: Command[T]): IO[T] =
+          clients(address.id).send(command)
 
-      override def send(snapshot: Snapshot, lastEntry: LogEntry): IO[AppendEntriesResponse] =
-        clients(address.id).send(snapshot, lastEntry)
-    }
+        override def send(snapshot: Snapshot, lastEntry: LogEntry): IO[AppendEntriesResponse] =
+          clients(address.id).send(snapshot, lastEntry)
+
+        override def close(): IO[Unit] = IO.unit
+      }
   }
 
   implicit val serverBuilder = new RpcServerBuilder[IO] {
-    override def build(address: Address, raft: Raft[IO]): IO[RpcServer[IO]] = IO(new RpcServer[IO] {
-      override def start(): IO[Unit] = IO.unit
-    })
+    override def build(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] =
+      Resource.pure[IO, RpcServer[IO]](new RpcServer[IO] {
+        override def start(): IO[Unit] = IO.unit
+      })
   }
 
   val nodes                  = List("node1", "node2", "node3")
@@ -100,7 +104,9 @@ object RaftTest extends App {
     )
 
     val stateMachine = new KvStateMachine()
-    val node         = Raft.make[IO](configuration, MemoryStorage.empty[IO], stateMachine)
+    val node = MemoryStorage.empty[IO].flatMap { storage =>
+      Raft.make[IO](configuration, storage, stateMachine)
+    }
     (node.unsafeRunSync(), stateMachine)
   }
 
@@ -121,5 +127,7 @@ object RaftTest extends App {
         IO(println(s"Sending an snapshot to node ${nodeId}")) *> node.onReceive(
           InstallSnapshot(snapshot, lastEntry)
         )
+
+      override def close(): IO[Unit] = IO.unit
     }
 }

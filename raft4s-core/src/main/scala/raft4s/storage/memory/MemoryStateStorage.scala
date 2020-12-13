@@ -1,7 +1,7 @@
 package raft4s.storage.memory
 
 import cats.Monad
-import raft4s.storage.{Snapshot, StateStorage}
+import raft4s.storage.StateStorage
 import raft4s.storage.internal.PersistedState
 
 class MemoryStateStorage[F[_]: Monad] extends StateStorage[F] {
@@ -13,6 +13,6 @@ class MemoryStateStorage[F[_]: Monad] extends StateStorage[F] {
 }
 
 object MemoryStateStorage {
-  def empty[F[_]: Monad] =
-    new MemoryStateStorage[F]
+  def empty[F[_]: Monad]: F[MemoryStateStorage[F]] =
+    Monad[F].pure(new MemoryStateStorage[F])
 }

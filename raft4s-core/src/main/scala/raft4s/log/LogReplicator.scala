@@ -12,7 +12,7 @@ import scala.collection.Set
 
 class LogReplicator[F[_]: Concurrent: Logger](
   leaderId: String,
-  log: ReplicatedLog[F],
+  log: Log[F],
   clients: RpcClientProvider[F],
   installing: Ref[F, Set[String]]
 ) {
@@ -21,7 +21,7 @@ class LogReplicator[F[_]: Concurrent: Logger](
     for {
       _        <- Logger[F].trace(s"Replicating logs to to ${peerId}. Term: ${term}, sentLength : ${sentLength}")
       _        <- snapshotIsNotInstalling(peerId)
-      snapshot <- log.getLatestSnapshot()
+      snapshot <- log.latestSnapshot
       response <-
         if (snapshot.exists(_.lastIndex > sentLength))
           sendSnapshot(peerId, snapshot.get)
@@ -57,7 +57,7 @@ class LogReplicator[F[_]: Concurrent: Logger](
 }
 
 object LogReplicator {
-  def build[F[_]: Concurrent: Logger](leaderId: String, clients: RpcClientProvider[F], log: ReplicatedLog[F]) =
+  def build[F[_]: Concurrent: Logger](leaderId: String, clients: RpcClientProvider[F], log: Log[F]) =
     for {
       installing <- Ref.of[F, Set[String]](Set.empty)
     } yield new LogReplicator[F](leaderId, log, clients, installing)
