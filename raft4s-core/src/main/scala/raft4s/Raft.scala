@@ -1,7 +1,7 @@
 package raft4s
 
 import cats.effect.concurrent.{Deferred, Ref}
-import cats.effect.{Concurrent, Sync, Timer}
+import cats.effect.{Concurrent, Resource, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
@@ -10,12 +10,12 @@ import raft4s.log.Log
 import raft4s.node._
 import raft4s.protocol._
 import raft4s.rpc._
-import raft4s.storage.Storage
+import raft4s.storage.{StateStorage, Storage}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
-class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
+class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   config: Configuration,
   clientProvider: RpcClientProvider[F],
   leaderAnnouncer: LeaderAnnouncer[F],
@@ -27,14 +27,14 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 )(implicit ME: MonadError[F, Throwable], logger: Logger[F])
     extends ErrorLogging[F] {
 
+  def initialize(): F[Unit] =
+    log.initialize()
+
   def start(): F[String] =
     errorLogging("Starting Cluster") {
       for {
         _      <- logger.info("Cluster is starting")
-        _      <- log.initialize()
-        server <- RpcServerBuilder[F].build(config.local, this)
-        _      <- server.start()
-        _      <- putInitialDelay()
+        _      <- delayElection()
         node   <- state.get
         _      <- if (node.leader.isDefined) Monad[F].unit else runElection()
         _      <- scheduleElection()
@@ -230,7 +230,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   private def runElection(): F[Unit] =
     for {
-      _        <- putInitialDelay()
+      _        <- delayElection()
       logState <- log.state
       actions  <- state.modify(_.onTimer(logState))
       _        <- runActions(actions)
@@ -266,7 +266,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
   private def background[A](fa: F[A]): F[Unit] =
     Concurrent[F].start(fa) *> Monad[F].unit
 
-  private def putInitialDelay(): F[Unit] =
+  private def delayElection(): F[Unit] =
     for {
       millis <- random(config.electionMinDelayMillis, config.electionMaxDelayMillis)
       delay  <- Sync[F].delay(FiniteDuration(millis, TimeUnit.MILLISECONDS))
@@ -279,21 +279,31 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 }
 
 object Raft {
-  def make[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: RpcServerBuilder: Logger](
+
+  def build[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
     config: Configuration,
     storage: Storage[F],
     stateMachine: StateMachine[F]
   ): F[Raft[F]] =
-    for {
-      persistedState  <- storage.stateStorage.retrieveState()
-      clientProvider  <- RpcClientProvider.build[F](config.members)
-      leaderAnnouncer <- LeaderAnnouncer.build[F]
-      nodeState <- Ref.of[F, NodeState](
-        FollowerNode(config.nodeId, config.nodes, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
-      )
-      heartbeat     <- Ref.of[F, Long](0L)
-      replicateLog  <- Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine)
-      logReplicator <- LogReplicator.build[F](config.nodeId, clientProvider, replicateLog)
+    resource(config, storage, stateMachine).use(Monad[F].pure)
 
-    } yield new Raft[F](config, clientProvider, leaderAnnouncer, logReplicator, replicateLog, storage, nodeState, heartbeat)
+  def resource[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
+    config: Configuration,
+    storage: Storage[F],
+    stateMachine: StateMachine[F]
+  ): Resource[F, Raft[F]] =
+    for {
+      clientProvider <- RpcClientProvider.resource[F](config.members)
+      log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine))
+      replicator     <- Resource.liftF(LogReplicator.build[F](config.nodeId, clientProvider, log))
+      announcer      <- Resource.liftF(LeaderAnnouncer.build[F])
+      heartbeat      <- Resource.liftF(Ref.of[F, Long](0L))
+      state          <- Resource.liftF(latestState(config, storage.stateStorage))
+      ref            <- Resource.liftF(Ref.of[F, NodeState](state))
+    } yield new Raft[F](config, clientProvider, announcer, replicator, log, storage, ref, heartbeat)
+
+  private def latestState[F[_]: Monad](config: Configuration, storage: StateStorage[F]): F[FollowerNode] =
+    for {
+      persisted <- storage.retrieveState()
+    } yield FollowerNode(config.nodeId, config.nodes, persisted.map(_.term).getOrElse(0L), persisted.flatMap(_.votedFor))
 }

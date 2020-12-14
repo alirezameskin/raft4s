@@ -1,25 +1,25 @@
 package raft4s.rpc.grpc.io.internal
 
-import cats.effect.{ContextShift, IO, Timer}
+import cats.effect.{ContextShift, IO}
 import com.google.protobuf
+import io.grpc.ManagedChannel
 import io.odin.Logger
 import raft4s.Address
 import raft4s.grpc.protos
-import raft4s.grpc.protos.RaftGrpc
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
 import raft4s.storage.Snapshot
-import scalapb.descriptors.ScalaType.ByteString
 
 import java.util.concurrent.TimeUnit
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{blocking, ExecutionContext}
 
-private[grpc] class GRPCRaftClient(address: Address, stub: RaftGrpc.RaftStub)(implicit
+private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(implicit
   CS: ContextShift[IO],
   EC: ExecutionContext,
   logger: Logger[IO]
 ) extends RpcClient[IO] {
+
+  val stub = protos.RaftGrpc.stub(channel)
 
   override def send(req: VoteRequest): IO[VoteResponse] = {
     val request  = protos.VoteRequest(req.nodeId, req.currentTerm, req.logLength, req.logTerm)
@@ -90,4 +90,13 @@ private[grpc] class GRPCRaftClient(address: Address, stub: RaftGrpc.RaftStub)(im
           .raiseError(error)
       }
   }
+
+  override def close(): IO[Unit] =
+    IO.delay {
+      channel.shutdown()
+      if (!blocking(channel.awaitTermination(30, TimeUnit.SECONDS))) {
+        channel.shutdownNow()
+        ()
+      }
+    }
 }

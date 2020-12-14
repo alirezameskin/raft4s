@@ -49,7 +49,7 @@ case class LeaderNode(
         FollowerNode(nodeId, nodes, currentTerm_, None, Some(msg.leaderId)),
         (
           AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
-          List(StoreState, AnnounceLeader(msg.leaderId))
+          List(StoreState, AnnounceLeader(msg.leaderId, true))
         )
       )
     else

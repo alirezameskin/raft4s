@@ -40,7 +40,7 @@ object RaftTest extends App {
   }
 
   implicit val serverBuilder = new RpcServerBuilder[IO] {
-    override def build(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] =
+    override def resource(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] =
       Resource.pure[IO, RpcServer[IO]](new RpcServer[IO] {
         override def start(): IO[Unit] = IO.unit
       })
@@ -105,7 +105,7 @@ object RaftTest extends App {
 
     val stateMachine = new KvStateMachine()
     val node = MemoryStorage.empty[IO].flatMap { storage =>
-      Raft.make[IO](configuration, storage, stateMachine)
+      Raft.build[IO](configuration, storage, stateMachine)
     }
     (node.unsafeRunSync(), stateMachine)
   }

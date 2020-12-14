@@ -18,7 +18,7 @@ object RaftTestSingleNode extends App {
   }
 
   implicit val serverBuilder = new RpcServerBuilder[IO] {
-    override def build(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] =
+    override def resource(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] =
       Resource.pure[IO, RpcServer[IO]](new RpcServer[IO] {
         override def start(): IO[Unit] = IO.unit
       })
@@ -28,7 +28,7 @@ object RaftTestSingleNode extends App {
 
   val result = for {
     storage <- MemoryStorage.empty[IO]
-    node    <- Raft.make[IO](config, storage, new KvStateMachine())
+    node    <- Raft.build[IO](config, storage, new KvStateMachine())
     _       <- node.start()
 
     res <- node.onCommand(Put("name", "Reza"))

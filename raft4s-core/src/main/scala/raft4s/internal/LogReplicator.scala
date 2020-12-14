@@ -57,7 +57,7 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
 }
 
 object LogReplicator {
-  def build[F[_]: Concurrent: Logger](leaderId: String, clients: RpcClientProvider[F], log: Log[F]) =
+  def build[F[_]: Concurrent: Logger](leaderId: String, clients: RpcClientProvider[F], log: Log[F]): F[LogReplicator[F]] =
     for {
       installing <- Ref.of[F, Set[String]](Set.empty)
     } yield new LogReplicator[F](leaderId, log, clients, installing)

@@ -21,7 +21,7 @@ object Test extends IOApp {
 
     val result1 = for {
       storage <- MemoryStorage.empty[IO]
-      node    <- Raft.make[IO](config1, storage, new KvStateMachine())
+      node    <- Raft.build[IO](config1, storage, new KvStateMachine())
       _       <- node.start()
 
       res <- node.onCommand(Get("name"))
@@ -35,7 +35,7 @@ object Test extends IOApp {
       )
     val result2 = for {
       storage <- MemoryStorage.empty[IO]
-      node    <- Raft.make[IO](config2, storage, new KvStateMachine())
+      node    <- Raft.build[IO](config2, storage, new KvStateMachine())
       _       <- node.start()
 
       res <- node.onCommand(Put("name", "Alireza"))
@@ -49,7 +49,7 @@ object Test extends IOApp {
       )
     val result3 = for {
       storage <- MemoryStorage.empty[IO]
-      node    <- Raft.make[IO](config3, storage, new KvStateMachine())
+      node    <- Raft.build[IO](config3, storage, new KvStateMachine())
       _       <- node.start()
 
       res <- node.onCommand(Get("name"))

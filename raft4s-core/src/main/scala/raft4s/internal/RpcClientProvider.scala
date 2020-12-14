@@ -1,6 +1,6 @@
 package raft4s.internal
 
-import cats.effect.Sync
+import cats.effect.{Resource, Sync}
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import cats.{Monad, MonadError}
@@ -66,11 +66,21 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
         }
     } yield client
 
+  def closeConnections(): F[Unit] =
+    for {
+      _     <- Logger[F].trace("Close all connections to other members")
+      items <- clients.get
+      _     <- items.values.toList.traverse(_.close())
+    } yield ()
 }
 
 object RpcClientProvider {
-  def build[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Address]): F[RpcClientProvider[F]] =
-    for {
+
+  def resource[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Address]): Resource[F, RpcClientProvider[F]] = {
+    val acquire = for {
       clients <- Ref.of[F, Map[String, RpcClient[F]]](Map.empty)
     } yield new RpcClientProvider[F](clients, members)
+
+    Resource.make(acquire)(pr => pr.closeConnections())
+  }
 }
