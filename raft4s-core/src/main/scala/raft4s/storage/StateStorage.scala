@@ -1,6 +1,6 @@
 package raft4s.storage
 
-import raft4s.storage.internal.PersistedState
+import raft4s.protocol.PersistedState
 
 trait StateStorage[F[_]] {
 

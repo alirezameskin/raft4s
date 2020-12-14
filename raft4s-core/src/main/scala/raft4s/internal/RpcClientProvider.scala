@@ -1,4 +1,4 @@
-package raft4s.rpc
+package raft4s.internal
 
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
@@ -7,9 +7,10 @@ import cats.{Monad, MonadError}
 import io.odin.Logger
 import raft4s.Address
 import raft4s.protocol._
+import raft4s.rpc.{RpcClient, RpcClientBuilder}
 import raft4s.storage.Snapshot
 
-class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
+private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   val clients: Ref[F, Map[String, RpcClient[F]]],
   val members: Seq[Address]
 )(implicit ME: MonadError[F, Throwable]) {

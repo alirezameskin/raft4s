@@ -1,16 +1,16 @@
-package raft4s.log
+package raft4s.internal
 
 import cats.effect.Concurrent
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import io.odin.Logger
+import raft4s.log.Log
 import raft4s.protocol.AppendEntriesResponse
-import raft4s.rpc.RpcClientProvider
 import raft4s.storage.Snapshot
 
 import scala.collection.Set
 
-class LogReplicator[F[_]: Concurrent: Logger](
+private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
   leaderId: String,
   log: Log[F],
   clients: RpcClientProvider[F],

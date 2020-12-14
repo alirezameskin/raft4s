@@ -5,8 +5,8 @@ import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
-import raft4s.helpers.ErrorLogging
-import raft4s.log.{Log, LogReplicator}
+import raft4s.internal.{ErrorLogging, LeaderAnnouncer, LogReplicator, RpcClientProvider}
+import raft4s.log.Log
 import raft4s.node._
 import raft4s.protocol._
 import raft4s.rpc._
@@ -230,6 +230,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel: RpcServerBuilder](
 
   private def runElection(): F[Unit] =
     for {
+      _        <- putInitialDelay()
       logState <- log.state
       actions  <- state.modify(_.onTimer(logState))
       _        <- runActions(actions)

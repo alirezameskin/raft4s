@@ -5,7 +5,7 @@ import cats.implicits._
 import io.odin.Logger
 import org.rocksdb.Options
 import org.{rocksdb => jrocks}
-import raft4s.helpers.ErrorLogging
+import raft4s.internal.ErrorLogging
 import raft4s.protocol.LogEntry
 import raft4s.storage.LogStorage
 import raft4s.storage.rocksdb.serializer.{LongSerializer, ObjectSerializer}

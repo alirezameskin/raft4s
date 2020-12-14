@@ -2,9 +2,9 @@ package raft4s.storage.file
 
 import cats.effect.Sync
 import io.odin.Logger
-import raft4s.helpers.ErrorLogging
+import raft4s.internal.ErrorLogging
+import raft4s.protocol.PersistedState
 import raft4s.storage.StateStorage
-import raft4s.storage.internal.PersistedState
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}

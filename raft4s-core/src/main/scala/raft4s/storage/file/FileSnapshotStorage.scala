@@ -4,7 +4,7 @@ import cats.implicits._
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import io.odin.Logger
-import raft4s.helpers.ErrorLogging
+import raft4s.internal.ErrorLogging
 import raft4s.storage.{Snapshot, SnapshotStorage}
 
 import java.nio

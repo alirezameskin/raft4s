@@ -1,9 +1,7 @@
 package raft4s.node
 
-import raft4s._
 import raft4s.log.LogState
-import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
-import raft4s.storage.internal.PersistedState
+import raft4s.protocol._
 
 case class FollowerNode(
   nodeId: String,

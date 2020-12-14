@@ -1,8 +1,6 @@
-package raft4s
+package raft4s.protocol
 
-import raft4s.protocol.VoteRequest
-
-sealed trait Action
+sealed private[raft4s] trait Action
 
 case class RequestForVote(peerId: String, request: VoteRequest)             extends Action
 case class ReplicateLog(peerId: String, term: Long, sentLength: Long)       extends Action

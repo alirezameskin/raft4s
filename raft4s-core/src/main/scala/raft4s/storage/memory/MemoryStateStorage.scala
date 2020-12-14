@@ -1,8 +1,8 @@
 package raft4s.storage.memory
 
 import cats.Monad
+import raft4s.protocol.PersistedState
 import raft4s.storage.StateStorage
-import raft4s.storage.internal.PersistedState
 
 class MemoryStateStorage[F[_]: Monad] extends StateStorage[F] {
 
