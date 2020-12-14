@@ -1,8 +1,8 @@
 package raft4s
 
-import cats.{Monad, Parallel}
-import cats.implicits._
 import cats.effect.{Concurrent, Resource, Timer}
+import cats.implicits._
+import cats.{Monad, Parallel}
 import io.odin.Logger
 import raft4s.protocol.Command
 import raft4s.rpc.{RpcClientBuilder, RpcServer, RpcServerBuilder}
@@ -25,6 +25,7 @@ class RaftCluster[F[_]: Monad](rpc: RpcServer[F], raft: Raft[F]) {
 }
 
 object RaftCluster {
+
   def resource[F[_]: Monad: Parallel: Concurrent: RpcServerBuilder: RpcClientBuilder: Timer: Logger](
     config: Configuration,
     storage: Storage[F],

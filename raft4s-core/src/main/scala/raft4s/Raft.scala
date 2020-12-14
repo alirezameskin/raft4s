@@ -280,13 +280,6 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
 
 object Raft {
 
-  def build[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
-    config: Configuration,
-    storage: Storage[F],
-    stateMachine: StateMachine[F]
-  ): F[Raft[F]] =
-    resource(config, storage, stateMachine).use(Monad[F].pure)
-
   def resource[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
     config: Configuration,
     storage: Storage[F],
