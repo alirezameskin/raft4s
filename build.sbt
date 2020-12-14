@@ -54,18 +54,7 @@ lazy val rocksdb = (project in file("raft4s-rocksdb"))
   .dependsOn(core)
   .aggregate(core)
 
-lazy val demo = (project in file("raft4s-demo"))
-  .settings(GlobalSettingsGroup)
-  .settings(
-    name := "raft4s-demo",
-    publish := {},
-    publishLocal := {}
-  )
-  .dependsOn(core, grpc, rocksdb)
-  .aggregate(core, grpc, rocksdb)
-
 lazy val root = (project in file("."))
-  .aggregate(demo)
   .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s",
