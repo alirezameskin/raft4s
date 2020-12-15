@@ -9,6 +9,7 @@ case class Configuration(
   local: Address,
   members: Seq[Address] = List.empty,
   followerAcceptRead: Boolean = true,
+  logCompactionThreshold: Int = 100,
   electionMinDelayMillis: Int = 150,
   electionMaxDelayMillis: Int = 300,
   heartbeatIntervalMillis: Int = 2000,

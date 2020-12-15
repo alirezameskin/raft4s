@@ -4,6 +4,7 @@ import cats.effect.{Concurrent, Resource, Timer}
 import cats.implicits._
 import cats.{Monad, Parallel}
 import io.odin.Logger
+import raft4s.log.{FixedSizeLogCompaction, LogCompactionPolicy}
 import raft4s.protocol.Command
 import raft4s.rpc.{RpcClientBuilder, RpcServer, RpcServerBuilder}
 import raft4s.storage.Storage
@@ -31,8 +32,21 @@ object RaftCluster {
     storage: Storage[F],
     stateMachine: StateMachine[F]
   ): Resource[F, RaftCluster[F]] =
+    resource(
+      config,
+      storage,
+      stateMachine,
+      FixedSizeLogCompaction(config.logCompactionThreshold)
+    )
+
+  def resource[F[_]: Monad: Parallel: Concurrent: RpcServerBuilder: RpcClientBuilder: Timer: Logger](
+    config: Configuration,
+    storage: Storage[F],
+    stateMachine: StateMachine[F],
+    compactionPolicy: LogCompactionPolicy[F]
+  ): Resource[F, RaftCluster[F]] =
     for {
-      raft   <- Raft.resource(config, storage, stateMachine)
+      raft   <- Raft.resource(config, storage, stateMachine, compactionPolicy)
       server <- RpcServerBuilder[F].resource(config.local, raft)
     } yield new RaftCluster[F](server, raft)
 }

@@ -6,7 +6,7 @@ import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import io.odin.Logger
 import raft4s.internal.{ErrorLogging, LeaderAnnouncer, LogReplicator, RpcClientProvider}
-import raft4s.log.Log
+import raft4s.log.{Log, LogCompactionPolicy}
 import raft4s.node._
 import raft4s.protocol._
 import raft4s.rpc._
@@ -283,11 +283,12 @@ object Raft {
   def resource[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
     config: Configuration,
     storage: Storage[F],
-    stateMachine: StateMachine[F]
+    stateMachine: StateMachine[F],
+    compactionPolicy: LogCompactionPolicy[F]
   ): Resource[F, Raft[F]] =
     for {
       clientProvider <- RpcClientProvider.resource[F](config.members)
-      log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine))
+      log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy))
       replicator     <- Resource.liftF(LogReplicator.build[F](config.nodeId, clientProvider, log))
       announcer      <- Resource.liftF(LeaderAnnouncer.build[F])
       heartbeat      <- Resource.liftF(Ref.of[F, Long](0L))

@@ -15,7 +15,8 @@ class Log[F[_]: Monad: Logger](
   logStorage: LogStorage[F],
   snapshotStorage: SnapshotStorage[F],
   stateMachine: StateMachine[F],
-  semaphore: Semaphore[F]
+  semaphore: Semaphore[F],
+  compactionPolicy: LogCompactionPolicy[F]
 )(implicit ME: MonadError[F, Throwable]) {
 
   private val deferreds = TrieMap[Long, Deferred[F, Any]]()
@@ -77,7 +78,8 @@ class Log[F[_]: Monad: Logger](
         appliedIndex <- stateMachine.appliedIndex
         _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
         _            <- putEntries(entries, logLength, leaderLogLength)
-        _            <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
+        committed    <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
+        _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
       } yield ()
     }
 
@@ -88,7 +90,8 @@ class Log[F[_]: Monad: Logger](
       for {
         logLength    <- logStorage.length
         appliedIndex <- stateMachine.appliedIndex
-        _            <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
+        committed    <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
+        _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
       } yield ()
     }
   }
@@ -132,7 +135,6 @@ class Log[F[_]: Monad: Logger](
       _     <- Logger[F].trace(s"Committing the log entry at index ${index}")
       entry <- logStorage.get(index)
       _     <- applyCommand(index, entry.command)
-      _     <- if (index % 5 == 0) takeSnapshot() else Monad[F].unit
     } yield ()
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
@@ -164,15 +166,22 @@ class Log[F[_]: Monad: Logger](
 
     } yield ()
 
+  private def compactLogs() =
+    for {
+      logState <- this.state
+      eligible <- compactionPolicy.eligible(logState, stateMachine)
+      _        <- if (eligible) takeSnapshot() else Monad[F].unit
+    } yield ()
 }
 
 object Log {
   def build[F[_]: Concurrent: Logger](
     logStorage: LogStorage[F],
     snapshotStorage: SnapshotStorage[F],
-    stateMachine: StateMachine[F]
+    stateMachine: StateMachine[F],
+    compactionPolicy: LogCompactionPolicy[F]
   ): F[Log[F]] =
     for {
       lock <- Semaphore[F](1)
-    } yield new Log(logStorage, snapshotStorage, stateMachine, lock)
+    } yield new Log(logStorage, snapshotStorage, stateMachine, lock, compactionPolicy)
 }
