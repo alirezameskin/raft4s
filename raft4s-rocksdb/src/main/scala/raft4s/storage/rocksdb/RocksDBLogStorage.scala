@@ -54,7 +54,29 @@ class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStora
   override def delete(index: Long): F[Unit] =
     errorLogging(s"Deleting a LogEntry at index ${index}") {
       Sync[F].delay {
+        println(s"deleting log at index ${index}")
         db.delete(LongSerializer.toBytes(index))
+      }
+    }
+
+  override def deleteBefore(index: Long): F[Unit] =
+    errorLogging(s"Deleting LogEntries before ${index}") {
+      Sync[F].delay {
+
+        val itr = db.newIterator()
+        itr.seekToFirst()
+
+        val iterator = new Iterator[Long] {
+          override def hasNext: Boolean = itr.isValid
+          override def next(): Long = {
+            val index = LongSerializer.toLong(itr.key())
+            itr.next()
+
+            index
+          }
+        }
+
+        iterator.takeWhile(_ < index).map(LongSerializer.toBytes).foreach(db.delete)
       }
     }
 }

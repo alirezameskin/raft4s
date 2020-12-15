@@ -4,11 +4,11 @@ import cats.Monad
 import raft4s.protocol.LogEntry
 import raft4s.storage.LogStorage
 
-import scala.collection.concurrent.TrieMap
+import scala.collection.mutable
 
 class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
 
-  private val map = TrieMap[Long, LogEntry]()
+  private val map = mutable.TreeMap.empty[Long, LogEntry]
 
   override def length: F[Long] =
     Monad[F].pure(map.size)
@@ -25,6 +25,11 @@ class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
   override def delete(index: Long): F[Unit] =
     Monad[F].pure {
       map.remove(index)
+    }
+
+  override def deleteBefore(index: Long): F[Unit] =
+    Monad[F].pure {
+      map.keysIterator.takeWhile(_ < index).foreach(map.remove)
     }
 }
 

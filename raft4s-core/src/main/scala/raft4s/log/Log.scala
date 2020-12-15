@@ -158,6 +158,10 @@ class Log[F[_]: Monad: Logger](
       snapshot <- stateMachine.takeSnapshot()
       _        <- snapshotStorage.saveSnapshot(snapshot)
       _        <- Logger[F].trace(s"Snapshot is stored ${snapshot}")
+      _        <- Logger[F].trace(s"Deleting logs before ${snapshot.lastIndex}")
+      _        <- logStorage.deleteBefore(snapshot.lastIndex)
+      _        <- Logger[F].trace(s"Logs before ${snapshot.lastIndex} are deleted.")
+
     } yield ()
 
 }

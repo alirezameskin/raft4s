@@ -55,6 +55,7 @@ lazy val rocksdb = (project in file("raft4s-rocksdb"))
   .aggregate(core)
 
 lazy val root = (project in file("."))
+  .aggregate(rocksdb, core, grpc)
   .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s",
