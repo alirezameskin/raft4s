@@ -23,6 +23,10 @@ class RaftCluster[F[_]: Monad](rpc: RpcServer[F], raft: Raft[F]) {
 
   def execute[T](command: Command[T]): F[T] =
     raft.onCommand(command)
+
+  def addMember(node: String): F[Unit] = ???
+
+  def removeMember(node: String): F[Unit] = ???
 }
 
 object RaftCluster {

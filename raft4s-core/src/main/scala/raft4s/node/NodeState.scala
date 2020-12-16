@@ -5,19 +5,23 @@ import raft4s.protocol._
 
 abstract class NodeState {
 
-  def onReceive(logState: LogState, msg: VoteRequest): (NodeState, (VoteResponse, List[Action]))
+  def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action])
 
-  def onReceive(logState: LogState, msg: AppendEntries): (NodeState, (AppendEntriesResponse, List[Action]))
+  def onReceive(logState: LogState, config: ClusterConfiguration, msg: VoteRequest): (NodeState, (VoteResponse, List[Action]))
 
-  def onReceive(logState: LogState, msg: VoteResponse): (NodeState, List[Action])
+  def onReceive(
+    state: LogState,
+    config: ClusterConfiguration,
+    msg: AppendEntries
+  ): (NodeState, (AppendEntriesResponse, List[Action]))
 
-  def onReceive(logState: LogState, msg: AppendEntriesResponse): (NodeState, List[Action])
+  def onReceive(logState: LogState, config: ClusterConfiguration, msg: VoteResponse): (NodeState, List[Action])
 
-  def onTimer(logState: LogState): (NodeState, List[Action])
+  def onReceive(logState: LogState, config: ClusterConfiguration, msg: AppendEntriesResponse): (NodeState, List[Action])
 
-  def onReplicateLog(): List[Action]
+  def onReplicateLog(config: ClusterConfiguration): List[Action]
 
-  def onSnapshotInstalled(logState: LogState): (NodeState, AppendEntriesResponse)
+  def onSnapshotInstalled(logState: LogState, config: ClusterConfiguration): (NodeState, AppendEntriesResponse)
 
   def leader: Option[String]
 

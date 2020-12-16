@@ -3,9 +3,9 @@ package raft4s
 import cats.effect.concurrent.{Deferred, Ref}
 import cats.effect.{Concurrent, Resource, Sync, Timer}
 import cats.implicits._
-import cats.{Monad, MonadError, Parallel}
+import cats.{Applicative, Monad, MonadError, Parallel}
 import io.odin.Logger
-import raft4s.internal.{ErrorLogging, LeaderAnnouncer, LogReplicator, RpcClientProvider}
+import raft4s.internal.{ErrorLogging, LeaderAnnouncer, LogReplicator, MembershipManager, RpcClientProvider}
 import raft4s.log.{Log, LogCompactionPolicy}
 import raft4s.node._
 import raft4s.protocol._
@@ -17,6 +17,7 @@ import scala.concurrent.duration.FiniteDuration
 
 class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   config: Configuration,
+  membershipManager: MembershipManager[F],
   clientProvider: RpcClientProvider[F],
   leaderAnnouncer: LeaderAnnouncer[F],
   logReplicator: LogReplicator[F],
@@ -55,7 +56,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       for {
         _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
         logState <- log.state
-        result   <- state.modify(_.onReceive(logState, msg))
+        config   <- membershipManager.getClusterConfiguration
+        result   <- state.modify(_.onReceive(logState, config, msg))
 
         (response, actions) = result
 
@@ -69,7 +71,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       for {
         _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
         logState <- log.state
-        actions  <- state.modify(_.onReceive(logState, msg))
+        config   <- membershipManager.getClusterConfiguration
+        actions  <- state.modify(_.onReceive(logState, config, msg))
         _        <- runActions(actions)
       } yield ()
     }
@@ -79,11 +82,12 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       for {
         _        <- logger.trace(s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}")
         logState <- log.state
+        config   <- membershipManager.getClusterConfiguration
         current  <- state.get
         time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
         _        <- lastHeartbeat.set(time)
 
-        (nextState, (response, actions)) = current.onReceive(logState, msg)
+        (nextState, (response, actions)) = current.onReceive(logState, config, msg)
 
         _ <- runActions(actions)
         _ <-
@@ -99,7 +103,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       for {
         _        <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
         logState <- log.state
-        actions  <- state.modify(_.onReceive(logState, msg))
+        config   <- membershipManager.getClusterConfiguration
+        actions  <- state.modify(_.onReceive(logState, config, msg))
         _        <- runActions(actions)
       } yield ()
     }
@@ -109,9 +114,20 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       for {
         _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
         logState <- log.state
-        response <- state.modify(_.onSnapshotInstalled(logState))
+        config   <- membershipManager.getClusterConfiguration
+        response <- state.modify(_.onSnapshotInstalled(logState, config))
       } yield response
     }
+
+  def addMember(member: String): F[Unit] = {
+    if (config.members.map(_.id).contains(member)) {
+      Applicative[F].unit
+    }
+    val oldMembers = config.members.map(_.id).toSet
+    val newMembers = oldMembers + member
+
+    onCommand[Unit](JointConfiguration(oldMembers, newMembers))
+  }
 
   def onCommand[T](command: Command[T]): F[T] =
     errorLogging("Receiving Command") {
@@ -128,12 +144,19 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
             _        <- logger.trace(s"A write comment received ${command}")
             deferred <- Deferred[F, T]
             state_   <- state.get
-            actions  <- onWriteCommand(state_, command, deferred)
+            config   <- membershipManager.getClusterConfiguration
+            actions  <- onWriteCommand(state_, config, command, deferred)
             _        <- runActions(actions)
             result   <- deferred.get
           } yield result
+
+        case cmd: ClusterConfigurationCommand =>
+          onConfigCommand(cmd)
       }
     }
+
+  private def onConfigCommand(command: ClusterConfigurationCommand): F[Unit] =
+    ???
 
   private def onReadCommand[T](node: NodeState, command: ReadCommand[T]): F[T] =
     node match {
@@ -159,9 +182,14 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         } yield response
     }
 
-  private def onWriteCommand[T](node: NodeState, command: WriteCommand[T], deferred: Deferred[F, T]): F[List[Action]] =
+  private def onWriteCommand[T](
+    node: NodeState,
+    config: ClusterConfiguration,
+    command: WriteCommand[T],
+    deferred: Deferred[F, T]
+  ): F[List[Action]] =
     node match {
-      case LeaderNode(_, _, term, _, _) =>
+      case LeaderNode(_, term, _, _) =>
         if (config.members.isEmpty)
           for {
             _ <- logger.trace("Appending the command to the log")
@@ -172,7 +200,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
           for {
             _ <- logger.trace("Appending the command to the log")
             _ <- log.append(term, command, deferred)
-          } yield node.onReplicateLog()
+          } yield node.onReplicateLog(config)
 
       case _ =>
         for {
@@ -232,15 +260,17 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     for {
       _        <- delayElection()
       logState <- log.state
-      actions  <- state.modify(_.onTimer(logState))
+      cluster  <- membershipManager.getClusterConfiguration
+      actions  <- state.modify(_.onTimer(logState, cluster))
       _        <- runActions(actions)
     } yield ()
 
   private def scheduleReplication(): F[Unit] = {
     val scheduled = for {
-      _    <- Timer[F].sleep(FiniteDuration(config.heartbeatIntervalMillis, TimeUnit.MILLISECONDS))
-      node <- state.get
-      actions = if (node.isInstanceOf[LeaderNode]) node.onReplicateLog() else List.empty
+      _      <- Timer[F].sleep(FiniteDuration(config.heartbeatIntervalMillis, TimeUnit.MILLISECONDS))
+      node   <- state.get
+      config <- membershipManager.getClusterConfiguration
+      actions = if (node.isInstanceOf[LeaderNode]) node.onReplicateLog(config) else List.empty
       _ <- runActions(actions)
     } yield ()
 
@@ -288,16 +318,17 @@ object Raft {
   ): Resource[F, Raft[F]] =
     for {
       clientProvider <- RpcClientProvider.resource[F](config.members)
-      log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy))
+      membership     <- Resource.liftF(MembershipManager.build[F](config.members.map(_.id).toSet))
+      log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership))
       replicator     <- Resource.liftF(LogReplicator.build[F](config.nodeId, clientProvider, log))
       announcer      <- Resource.liftF(LeaderAnnouncer.build[F])
       heartbeat      <- Resource.liftF(Ref.of[F, Long](0L))
       state          <- Resource.liftF(latestState(config, storage.stateStorage))
       ref            <- Resource.liftF(Ref.of[F, NodeState](state))
-    } yield new Raft[F](config, clientProvider, announcer, replicator, log, storage, ref, heartbeat)
+    } yield new Raft[F](config, membership, clientProvider, announcer, replicator, log, storage, ref, heartbeat)
 
   private def latestState[F[_]: Monad](config: Configuration, storage: StateStorage[F]): F[FollowerNode] =
     for {
       persisted <- storage.retrieveState()
-    } yield FollowerNode(config.nodeId, config.nodes, persisted.map(_.term).getOrElse(0L), persisted.flatMap(_.votedFor))
+    } yield FollowerNode(config.nodeId, persisted.map(_.term).getOrElse(0L), persisted.flatMap(_.votedFor))
 }

@@ -6,6 +6,7 @@ import cats.implicits._
 import cats.{Monad, MonadError}
 import io.odin.Logger
 import raft4s.StateMachine
+import raft4s.internal.MembershipManager
 import raft4s.protocol._
 import raft4s.storage.{LogStorage, Snapshot, SnapshotStorage}
 
@@ -15,6 +16,7 @@ class Log[F[_]: Monad: Logger](
   logStorage: LogStorage[F],
   snapshotStorage: SnapshotStorage[F],
   stateMachine: StateMachine[F],
+  membershipManager: MembershipManager[F],
   semaphore: Semaphore[F],
   compactionPolicy: LogCompactionPolicy[F]
 )(implicit ME: MonadError[F, Throwable]) {
@@ -139,6 +141,9 @@ class Log[F[_]: Monad: Logger](
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
     val output = command match {
+      case command: ClusterConfiguration =>
+        membershipManager.changeConfiguration(command)
+
       case command: ReadCommand[_] =>
         stateMachine.applyRead.apply(command)
 
@@ -179,9 +184,10 @@ object Log {
     logStorage: LogStorage[F],
     snapshotStorage: SnapshotStorage[F],
     stateMachine: StateMachine[F],
-    compactionPolicy: LogCompactionPolicy[F]
+    compactionPolicy: LogCompactionPolicy[F],
+    membershipManager: MembershipManager[F]
   ): F[Log[F]] =
     for {
       lock <- Semaphore[F](1)
-    } yield new Log(logStorage, snapshotStorage, stateMachine, lock, compactionPolicy)
+    } yield new Log(logStorage, snapshotStorage, stateMachine, membershipManager, lock, compactionPolicy)
 }
