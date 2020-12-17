@@ -7,6 +7,8 @@ service Raft {
   rpc appendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
   rpc execute(CommandRequest) returns (CommandResponse) {}
   rpc installSnapshot(InstallSnapshotRequest) returns (AppendEntriesResponse) {}
+  rpc addMember(AddMemberRequest) returns (AddMemberResponse) {}
+  rpc removeMember(RemoveMemberRequest) returns (RemoveMemberResponse) {}
 }
 
 message InstallSnapshotRequest {
@@ -58,3 +60,19 @@ message AppendEntriesResponse {
   bool success = 4;
 }
 
+
+message AddMemberRequest {
+  string host = 1;
+  int32 port = 2;
+}
+
+message AddMemberResponse {
+}
+
+message RemoveMemberRequest {
+  string host = 1;
+  int32  port = 2;
+}
+
+message RemoveMemberResponse {
+}

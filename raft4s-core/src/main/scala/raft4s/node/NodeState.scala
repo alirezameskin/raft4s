@@ -23,7 +23,7 @@ abstract class NodeState {
 
   def onSnapshotInstalled(logState: LogState, config: ClusterConfiguration): (NodeState, AppendEntriesResponse)
 
-  def leader: Option[String]
+  def leader: Option[Node]
 
   def toPersistedState: PersistedState
 }

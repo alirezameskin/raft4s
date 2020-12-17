@@ -1,13 +1,10 @@
 package raft4s
 
-case class Address(host: String, port: Int) {
-  override def toString: String = id
-  def id: String                = s"${host}:${port}"
-}
+import raft4s.protocol.Node
 
 case class Configuration(
-  local: Address,
-  members: Seq[Address] = List.empty,
+  local: Node,
+  members: Seq[Node] = List.empty,
   followerAcceptRead: Boolean = true,
   logCompactionThreshold: Int = 100,
   electionMinDelayMillis: Int = 150,

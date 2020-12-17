@@ -4,8 +4,8 @@ import cats.effect.IO
 import io.odin.Logger
 import raft4s.Raft
 import raft4s.grpc.protos
-import raft4s.grpc.protos.{CommandRequest, CommandResponse, InstallSnapshotRequest}
-import raft4s.protocol.{AppendEntries, Command, InstallSnapshot, LogEntry, VoteRequest}
+import raft4s.grpc.protos.{AddMemberRequest, AddMemberResponse, CommandRequest, CommandResponse, InstallSnapshotRequest, RemoveMemberRequest, RemoveMemberResponse}
+import raft4s.protocol.{AppendEntries, Command, InstallSnapshot, LogEntry, Node, VoteRequest}
 import raft4s.storage.Snapshot
 
 import java.nio.ByteBuffer
@@ -15,8 +15,8 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
 
   override def vote(request: protos.VoteRequest): Future[protos.VoteResponse] =
     raft
-      .onReceive(VoteRequest(request.nodeId, request.currentTerm, request.logLength, request.logTerm))
-      .map(res => protos.VoteResponse(res.nodeId, res.term, res.granted))
+      .onReceive(VoteRequest(toNode(request.nodeId), request.currentTerm, request.logLength, request.logTerm))
+      .map(res => protos.VoteResponse(res.nodeId.id, res.term, res.granted))
       .handleErrorWith { error =>
         logger.warn(s"Error during the VoteRequest process. Error ${error.getMessage}") *> IO.raiseError(error)
       }
@@ -26,7 +26,7 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
     raft
       .onReceive(
         AppendEntries(
-          request.leaderId,
+          toNode(request.leaderId),
           request.term,
           request.logLength,
           request.logTerm,
@@ -36,7 +36,7 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
             .toList
         )
       )
-      .map(response => protos.AppendEntriesResponse(response.nodeId, response.currentTerm, response.ack, response.success))
+      .map(response => protos.AppendEntriesResponse(response.nodeId.id, response.currentTerm, response.ack, response.success))
       .unsafeToFuture()
 
   override def execute(request: CommandRequest): Future[CommandResponse] =
@@ -58,9 +58,23 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
             .get
         )
       )
-      .map(response => protos.AppendEntriesResponse(response.nodeId, response.currentTerm, response.ack, response.success))
+      .map(response => protos.AppendEntriesResponse(response.nodeId.id, response.currentTerm, response.ack, response.success))
       .handleErrorWith { error =>
         logger.warn(s"An error during snapshot installation. Error ${error.getMessage}") *> IO.raiseError(error)
       }
       .unsafeToFuture()
+
+  override def addMember(request: AddMemberRequest): Future[AddMemberResponse] =
+    raft
+      .addMember(Node(request.host, request.port))
+      .map(_ => AddMemberResponse())
+      .unsafeToFuture()
+
+  override def removeMember(request: RemoveMemberRequest): Future[RemoveMemberResponse] =
+    raft
+      .removeMember(Node(request.host, request.port))
+      .map(_ => RemoveMemberResponse())
+      .unsafeToFuture()
+
+  private def toNode(str: String): Node = Node.fromString(str).get //TODO
 }

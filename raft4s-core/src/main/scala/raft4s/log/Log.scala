@@ -49,7 +49,7 @@ class Log[F[_]: Monad: Logger](
       } yield ()
     }
 
-  def getAppendEntries(leaderId: String, term: Long, sentLength: Long): F[AppendEntries] =
+  def getAppendEntries(leaderId: Node, term: Long, sentLength: Long): F[AppendEntries] =
     for {
       length       <- logStorage.length
       appliedIndex <- stateMachine.appliedIndex
@@ -85,7 +85,7 @@ class Log[F[_]: Monad: Logger](
       } yield ()
     }
 
-  def commitLogs(ackedLength: Map[String, Long]): F[Unit] = {
+  def commitLogs(ackedLength: Map[Node, Long]): F[Unit] = {
     def acked(config: ClusterConfiguration, index: Long): Boolean =
       config.quorumReached(ackedLength.filter(_._2 >= index).keySet)
 

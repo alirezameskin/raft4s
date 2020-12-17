@@ -5,19 +5,19 @@ import cats.effect.concurrent.Ref
 import cats.implicits._
 import io.odin.Logger
 import raft4s.log.Log
-import raft4s.protocol.AppendEntriesResponse
+import raft4s.protocol.{AppendEntriesResponse, Node}
 import raft4s.storage.Snapshot
 
 import scala.collection.Set
 
 private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
-  leaderId: String,
-  log: Log[F],
-  clients: RpcClientProvider[F],
-  installing: Ref[F, Set[String]]
+                                                               leaderId: Node,
+                                                               log: Log[F],
+                                                               clients: RpcClientProvider[F],
+                                                               installing: Ref[F, Set[Node]]
 ) {
 
-  def replicatedLogs(peerId: String, term: Long, sentLength: Long): F[AppendEntriesResponse] =
+  def replicatedLogs(peerId: Node, term: Long, sentLength: Long): F[AppendEntriesResponse] =
     for {
       _        <- Logger[F].trace(s"Replicating logs to to ${peerId}. Term: ${term}, sentLength : ${sentLength}")
       _        <- snapshotIsNotInstalling(peerId)
@@ -32,7 +32,7 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
 
     } yield response
 
-  private def sendSnapshot(peerId: String, snapshot: Snapshot): F[AppendEntriesResponse] = {
+  private def sendSnapshot(peerId: Node, snapshot: Snapshot): F[AppendEntriesResponse] = {
     val response = for {
       _        <- Logger[F].trace(s"Installing an Snapshot for peer ${peerId}, snapshot: ${snapshot}")
       _        <- installing.update(_ + peerId)
@@ -47,7 +47,7 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
     }
   }
 
-  private def snapshotIsNotInstalling(peerId: String): F[Unit] =
+  private def snapshotIsNotInstalling(peerId: Node): F[Unit] =
     for {
       set <- installing.get
       _ <-
@@ -57,8 +57,8 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
 }
 
 object LogReplicator {
-  def build[F[_]: Concurrent: Logger](leaderId: String, clients: RpcClientProvider[F], log: Log[F]): F[LogReplicator[F]] =
+  def build[F[_]: Concurrent: Logger](leaderId: Node, clients: RpcClientProvider[F], log: Log[F]): F[LogReplicator[F]] =
     for {
-      installing <- Ref.of[F, Set[String]](Set.empty)
+      installing <- Ref.of[F, Set[Node]](Set.empty)
     } yield new LogReplicator[F](leaderId, log, clients, installing)
 }

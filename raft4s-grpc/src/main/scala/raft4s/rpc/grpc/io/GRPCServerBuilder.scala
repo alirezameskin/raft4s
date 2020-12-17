@@ -4,16 +4,17 @@ import _root_.io.grpc.{Server, ServerBuilder}
 import cats.effect.{IO, Resource}
 import io.odin.Logger
 import raft4s.grpc.protos
+import raft4s.protocol.Node
 import raft4s.rpc.grpc.io.internal.GRPCRaftService
 import raft4s.rpc.{RpcServer, RpcServerBuilder}
-import raft4s.{Address, Raft}
+import raft4s.{ Raft}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
 
 class GRPCServerBuilder(implicit L: Logger[IO]) extends RpcServerBuilder[IO] {
 
-  override def resource(address: Address, raft: Raft[IO]): Resource[IO, RpcServer[IO]] = {
+  override def resource(node: Node, raft: Raft[IO]): Resource[IO, RpcServer[IO]] = {
 
     val service = protos.RaftGrpc.bindService(
       new GRPCRaftService(raft),
@@ -21,7 +22,7 @@ class GRPCServerBuilder(implicit L: Logger[IO]) extends RpcServerBuilder[IO] {
     );
 
     val builder: ServerBuilder[_] = ServerBuilder
-      .forPort(address.port)
+      .forPort(node.port)
       .addService(service)
 
     val acquire = IO.delay(builder.build().start())

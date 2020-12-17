@@ -5,29 +5,29 @@ import cats.implicits._
 import cats.{Monad, Parallel}
 import io.odin.Logger
 import raft4s.log.{FixedSizeLogCompaction, LogCompactionPolicy}
-import raft4s.protocol.Command
+import raft4s.protocol.{Command, Node}
 import raft4s.rpc.{RpcClientBuilder, RpcServer, RpcServerBuilder}
 import raft4s.storage.Storage
 
 class RaftCluster[F[_]: Monad](rpc: RpcServer[F], raft: Raft[F]) {
 
-  def start: F[String] =
+  def start: F[Node] =
     for {
       _      <- raft.initialize()
       _      <- rpc.start()
       leader <- raft.start()
     } yield leader
 
-  def leader: F[String] =
+  def leader: F[Node] =
     raft.listen()
 
   def execute[T](command: Command[T]): F[T] =
     raft.onCommand(command)
 
-  def addMember(node: String): F[Unit] =
+  def addMember(node: Node): F[Unit] =
     raft.addMember(node)
 
-  def removeMember(node: String): F[Unit] =
+  def removeMember(node: Node): F[Unit] =
     raft.removeMember(node)
 }
 

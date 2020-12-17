@@ -31,7 +31,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   def initialize(): F[Unit] =
     log.initialize()
 
-  def start(): F[String] =
+  def start(): F[Node] =
     errorLogging("Starting Cluster") {
       for {
         _      <- logger.info("Cluster is starting")
@@ -46,7 +46,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       } yield leader
     }
 
-  def listen(): F[String] =
+  def listen(): F[Node] =
     errorLogging("Waiting for the Leader to be elected") {
       leaderAnnouncer.listen()
     }
@@ -119,12 +119,12 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       } yield response
     }
 
-  def addMember(member: String): F[Unit] = {
+  def addMember(member: Node): F[Unit] = {
     if (config.members.map(_.id).contains(member)) {
       Applicative[F].unit
     }
 
-    val oldMembers = config.members.map(_.id).toSet
+    val oldMembers = config.members.toSet
     val newMembers = oldMembers + member
     val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
 
@@ -138,12 +138,12 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     } yield ()
   }
 
-  def removeMember(member: String): F[Unit] = {
+  def removeMember(member: Node): F[Unit] = {
     if (!config.members.map(_.id).contains(member)) {
       Applicative[F].unit
     }
 
-    val oldMembers = config.members.map(_.id).toSet
+    val oldMembers = config.members.toSet
     val newMembers = oldMembers - member
     val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
 
@@ -216,7 +216,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
           for {
             _     <- logger.trace("Appending the command to the log")
             entry <- log.append(term, command, deferred)
-            _     <- log.commitLogs(Map(config.local.id -> entry.index))
+            _     <- log.commitLogs(Map(config.local -> entry.index))
           } yield List.empty
         else
           for {
@@ -340,9 +340,9 @@ object Raft {
   ): Resource[F, Raft[F]] =
     for {
       clientProvider <- RpcClientProvider.resource[F](config.members)
-      membership     <- Resource.liftF(MembershipManager.build[F](config.members.map(_.id).toSet + config.local.id))
+      membership     <- Resource.liftF(MembershipManager.build[F](config.members.toSet + config.local))
       log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership))
-      replicator     <- Resource.liftF(LogReplicator.build[F](config.nodeId, clientProvider, log))
+      replicator     <- Resource.liftF(LogReplicator.build[F](config.local, clientProvider, log))
       announcer      <- Resource.liftF(LeaderAnnouncer.build[F])
       heartbeat      <- Resource.liftF(Ref.of[F, Long](0L))
       state          <- Resource.liftF(latestState(config, storage.stateStorage))
@@ -352,5 +352,5 @@ object Raft {
   private def latestState[F[_]: Monad](config: Configuration, storage: StateStorage[F]): F[FollowerNode] =
     for {
       persisted <- storage.retrieveState()
-    } yield FollowerNode(config.nodeId, persisted.map(_.term).getOrElse(0L), persisted.flatMap(_.votedFor))
+    } yield FollowerNode(config.local, persisted.map(_.term).getOrElse(0L), persisted.flatMap(_.votedFor))
 }

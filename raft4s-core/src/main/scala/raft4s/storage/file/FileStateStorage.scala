@@ -3,7 +3,7 @@ package raft4s.storage.file
 import cats.effect.Sync
 import io.odin.Logger
 import raft4s.internal.ErrorLogging
-import raft4s.protocol.PersistedState
+import raft4s.protocol.{PersistedState, Node}
 import raft4s.storage.StateStorage
 
 import java.nio.charset.StandardCharsets
@@ -16,7 +16,7 @@ class FileStateStorage[F[_]: Sync: Logger](path: Path) extends StateStorage[F] w
   override def persistState(state: PersistedState): F[Unit] =
     errorLogging("Error in Persisting State") {
       Sync[F].delay {
-        val content = List(state.term.toString, state.votedFor.getOrElse(""))
+        val content = List(state.term.toString, state.votedFor.map(_.id).getOrElse(""))
 
         Files.write(path, content.asJava, StandardCharsets.UTF_8)
         ()
@@ -30,7 +30,7 @@ class FileStateStorage[F[_]: Sync: Logger](path: Path) extends StateStorage[F] w
           lines <- Try(Files.readAllLines(path, StandardCharsets.UTF_8).asScala)
           term  <- Try(lines.head.toLong)
           voted <- Try(lines.tail.headOption)
-        } yield PersistedState(term, voted)
+        } yield PersistedState(term, voted.flatMap(Node.fromString))
 
         state.toOption
       }

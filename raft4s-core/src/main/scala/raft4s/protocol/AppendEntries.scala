@@ -1,7 +1,7 @@
 package raft4s.protocol
 
 case class AppendEntries(
-  leaderId: String,
+  leaderId: Node,
   term: Long,
   logLength: Long,
   logTerm: Long,

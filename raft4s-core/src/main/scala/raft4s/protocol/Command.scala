@@ -8,9 +8,9 @@ sealed trait ClusterConfigurationCommand extends WriteCommand[Unit] {
   def toConfig: ClusterConfiguration
 }
 
-case class JointConfigurationCommand(oldMembers: Set[String], newMembers: Set[String]) extends ClusterConfigurationCommand {
+case class JointConfigurationCommand(oldMembers: Set[Node], newMembers: Set[Node]) extends ClusterConfigurationCommand {
   override def toConfig: ClusterConfiguration = JointClusterConfiguration(oldMembers, newMembers)
 }
-case class NewConfigurationCommand(members: Set[String]) extends ClusterConfigurationCommand {
+case class NewConfigurationCommand(members: Set[Node]) extends ClusterConfigurationCommand {
   override def toConfig: ClusterConfiguration = NewClusterConfiguration(members)
 }

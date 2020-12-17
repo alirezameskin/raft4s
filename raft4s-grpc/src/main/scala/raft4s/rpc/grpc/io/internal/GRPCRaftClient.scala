@@ -4,16 +4,16 @@ import cats.effect.{ContextShift, IO}
 import com.google.protobuf
 import io.grpc.ManagedChannel
 import io.odin.Logger
-import raft4s.Address
 import raft4s.grpc.protos
+import raft4s.grpc.protos.{AddMemberRequest, RemoveMemberRequest}
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
 import raft4s.storage.Snapshot
 
 import java.util.concurrent.TimeUnit
-import scala.concurrent.{blocking, ExecutionContext}
+import scala.concurrent.{ExecutionContext, blocking}
 
-private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(implicit
+private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit
   CS: ContextShift[IO],
   EC: ExecutionContext,
   logger: Logger[IO]
@@ -22,8 +22,8 @@ private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(im
   val stub = protos.RaftGrpc.stub(channel)
 
   override def send(req: VoteRequest): IO[VoteResponse] = {
-    val request  = protos.VoteRequest(req.nodeId, req.currentTerm, req.logLength, req.logTerm)
-    val response = stub.vote(request).map(res => VoteResponse(res.nodeId, res.term, res.granted))
+    val request  = protos.VoteRequest(req.nodeId.id, req.currentTerm, req.logLength, req.logTerm)
+    val response = stub.vote(request).map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
 
     IO
       .fromFuture(IO(response))
@@ -35,7 +35,7 @@ private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(im
 
   override def send(appendEntries: AppendEntries): IO[AppendEntriesResponse] = {
     val request = protos.AppendEntriesRequest(
-      appendEntries.leaderId,
+      appendEntries.leaderId.id,
       appendEntries.term,
       appendEntries.logLength,
       appendEntries.logTerm,
@@ -48,7 +48,7 @@ private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(im
     val response =
       stub
         .appendEntries(request)
-        .map(res => AppendEntriesResponse(res.nodeId, res.currentTerm, res.ack, res.success))
+        .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
 
     IO
       .fromFuture(IO(response))
@@ -79,7 +79,7 @@ private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(im
       )
     val response = stub
       .installSnapshot(request)
-      .map(res => AppendEntriesResponse(res.nodeId, res.currentTerm, res.ack, res.success))
+      .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
 
     IO
       .fromFuture(IO(response))
@@ -91,6 +91,17 @@ private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(im
       }
   }
 
+  override def addMember(server: String): IO[Boolean] =
+    IO
+      .fromFuture(IO(stub.addMember(AddMemberRequest(server))))
+      .map(_ => true)
+
+  override def removeMember(server: String): IO[Boolean] =
+    IO
+      .fromFuture(IO(stub.removeMember(RemoveMemberRequest(server))))
+      .map(_ => true)
+
+
   override def close(): IO[Unit] =
     IO.delay {
       channel.shutdown()
@@ -99,4 +110,6 @@ private[grpc] class GRPCRaftClient(address: Address, channel: ManagedChannel)(im
         ()
       }
     }
+
+  private def toNode(str: String): Node = Node.fromString(str).get //TODO
 }

@@ -4,10 +4,10 @@ import raft4s.log.LogState
 import raft4s.protocol._
 
 case class LeaderNode(
-  nodeId: String,
-  currentTerm: Long,
-  ackedLength: Map[String, Long],
-  sentLength: Map[String, Long]
+                       node: Node,
+                       currentTerm: Long,
+                       ackedLength: Map[Node, Long],
+                       sentLength: Map[Node, Long]
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) =
@@ -24,8 +24,8 @@ case class LeaderNode(
 
     if (logOK && termOK)
       (
-        FollowerNode(nodeId, msg.currentTerm, Some(msg.nodeId)),
-        (VoteResponse(nodeId, msg.currentTerm, true), List(StoreState))
+        FollowerNode(node, msg.currentTerm, Some(msg.nodeId)),
+        (VoteResponse(node, msg.currentTerm, true), List(StoreState))
       )
     else {
 
@@ -34,7 +34,7 @@ case class LeaderNode(
 
       (
         this.copy(sentLength = sentLength_, ackedLength = ackedLength_),
-        (VoteResponse(nodeId, currentTerm, false), List(ReplicateLog(msg.nodeId, currentTerm, msg.logLength)))
+        (VoteResponse(node, currentTerm, false), List(ReplicateLog(msg.nodeId, currentTerm, msg.logLength)))
       )
     }
   }
@@ -53,14 +53,14 @@ case class LeaderNode(
 
     if (msg.term == currentTerm_ && logOK)
       (
-        FollowerNode(nodeId, currentTerm_, None, Some(msg.leaderId)),
+        FollowerNode(node, currentTerm_, None, Some(msg.leaderId)),
         (
-          AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
+          AppendEntriesResponse(node, currentTerm_, msg.logLength + msg.entries.length, true),
           List(StoreState, AnnounceLeader(msg.leaderId, true))
         )
       )
     else
-      (this, (AppendEntriesResponse(nodeId, currentTerm, logState.length, false), List.empty))
+      (this, (AppendEntriesResponse(node, currentTerm, logState.length, false), List.empty))
   }
 
   override def onReceive(
@@ -75,7 +75,7 @@ case class LeaderNode(
 
         (
           this.copy(ackedLength = ackedLength_, sentLength = sentLength_),
-          List(CommitLogs(ackedLength_ + (nodeId -> logState.length)))
+          List(CommitLogs(ackedLength_ + (node -> logState.length)))
         )
 
       } else if (sentLength(msg.nodeId) > 0) {
@@ -86,22 +86,22 @@ case class LeaderNode(
       } else
         (this, List.empty)
     else if (msg.currentTerm > currentTerm)
-      (FollowerNode(nodeId, msg.currentTerm), List(StoreState))
+      (FollowerNode(node, msg.currentTerm), List(StoreState))
     else
       (this, List.empty)
 
   override def onReplicateLog(cluster: ClusterConfiguration): List[Action] =
     cluster.members
-      .filterNot(_ == nodeId)
+      .filterNot(_ == node)
       .map(peer => ReplicateLog(peer, currentTerm, sentLength.getOrElse(peer, 0L)))
       .toList
 
-  override def leader: Option[String] =
-    Some(nodeId)
+  override def leader: Option[Node] =
+    Some(node)
 
   override def toPersistedState: PersistedState =
-    PersistedState(currentTerm, Some(nodeId))
+    PersistedState(currentTerm, Some(node))
 
   override def onSnapshotInstalled(logState: LogState, cluster: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(nodeId, currentTerm, logState.length - 1, false))
+    (this, AppendEntriesResponse(node, currentTerm, logState.length - 1, false))
 }

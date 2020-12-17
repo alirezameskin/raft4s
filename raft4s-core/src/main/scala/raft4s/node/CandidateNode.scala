@@ -4,29 +4,29 @@ import raft4s.log.LogState
 import raft4s.protocol.{PersistedState, _}
 
 case class CandidateNode(
-  nodeId: String,
-  currentTerm: Long,
-  lastTerm: Long,
-  votedFor: Option[String] = None,
-  votedReceived: Set[String] = Set.empty
+                          node: Node,
+                          currentTerm: Long,
+                          lastTerm: Long,
+                          votedFor: Option[Node] = None,
+                          votedReceived: Set[Node] = Set.empty
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
     val currentTerm_ = currentTerm + 1
     val lastTerm_    = logState.lastTerm.getOrElse(lastTerm)
-    val request      = VoteRequest(nodeId, currentTerm_, logState.length, lastTerm_)
-    val actions      = config.members.toList.filterNot(_ == nodeId).map(nodeId => RequestForVote(nodeId, request))
+    val request      = VoteRequest(node, currentTerm_, logState.length, lastTerm_)
+    val actions      = config.members.toList.filterNot(_ == node).map(nodeId => RequestForVote(nodeId, request))
     val quorumSize   = (config.members.size + 1) / 2
 
     if (1 >= quorumSize) {
-      val ackedLength = config.members.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
-      val sentLength  = config.members.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
-      val actions     = config.members.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
+      val ackedLength = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
+      val sentLength  = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
+      val actions     = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
 
-      (LeaderNode(nodeId, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(nodeId) :: actions)
+      (LeaderNode(node, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(node) :: actions)
     } else {
       (
-        this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(nodeId), votedReceived = Set(nodeId)),
+        this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(node), votedReceived = Set(node)),
         StoreState :: actions
       )
     }
@@ -45,11 +45,11 @@ case class CandidateNode(
 
     if (logOK && termOK) {
       (
-        FollowerNode(nodeId, msg.currentTerm, Some(msg.nodeId), None),
-        (VoteResponse(nodeId, msg.currentTerm, true), List(StoreState))
+        FollowerNode(node, msg.currentTerm, Some(msg.nodeId), None),
+        (VoteResponse(node, msg.currentTerm, true), List(StoreState))
       )
     } else {
-      (this, (VoteResponse(nodeId, currentTerm, false), List.empty))
+      (this, (VoteResponse(node, currentTerm, false), List.empty))
     }
   }
 
@@ -58,13 +58,13 @@ case class CandidateNode(
     val quorumSize     = (config.members.size + 1) / 2
 
     if (msg.term > currentTerm)
-      (FollowerNode(nodeId, msg.term), List(StoreState))
+      (FollowerNode(node, msg.term), List(StoreState))
     else if (msg.term == currentTerm && msg.granted && votedReceived_.size >= quorumSize) {
-      val ackedLength = config.members.filterNot(_ == nodeId).map(n => (n, logState.length)).toMap
-      val sentLength  = config.members.filterNot(_ == nodeId).map(n => (n, logState.appliedIndex.getOrElse(0L))).toMap
-      val actions     = config.members.filterNot(_ == nodeId).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
+      val ackedLength = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
+      val sentLength  = config.members.filterNot(_ == node).map(n => (n, logState.appliedIndex.getOrElse(0L))).toMap
+      val actions     = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
 
-      (LeaderNode(nodeId, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(nodeId) :: actions)
+      (LeaderNode(node, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(node) :: actions)
 
     } else
       (this.copy(votedReceived = votedReceived_), List.empty)
@@ -84,9 +84,9 @@ case class CandidateNode(
 
     if (msg.term == currentTerm_ && logOK)
       (
-        FollowerNode(nodeId, currentTerm_, None, Some(msg.leaderId)),
+        FollowerNode(node, currentTerm_, None, Some(msg.leaderId)),
         (
-          AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
+          AppendEntriesResponse(node, currentTerm_, msg.logLength + msg.entries.length, true),
           List(StoreState, AnnounceLeader(msg.leaderId))
         )
       )
@@ -94,7 +94,7 @@ case class CandidateNode(
       (
         this.copy(currentTerm = currentTerm_),
         (
-          AppendEntriesResponse(nodeId, currentTerm_, logState.appliedIndex.getOrElse(0), false),
+          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex.getOrElse(0), false),
           if (currentTerm == currentTerm_) List.empty else List(StoreState)
         )
       )
@@ -110,12 +110,12 @@ case class CandidateNode(
   override def onReplicateLog(config: ClusterConfiguration): List[Action] =
     List.empty
 
-  override def leader: Option[String] =
+  override def leader: Option[Node] =
     None
 
   override def toPersistedState: PersistedState =
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, cluster: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(nodeId, currentTerm, logState.appliedIndex.getOrElse(0), false))
+    (this, AppendEntriesResponse(node, currentTerm, logState.appliedIndex.getOrElse(0), false))
 }

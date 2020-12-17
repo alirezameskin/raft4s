@@ -4,14 +4,14 @@ import raft4s.log.LogState
 import raft4s.protocol._
 
 case class FollowerNode(
-  nodeId: String,
-  currentTerm: Long,
-  votedFor: Option[String] = None,
-  currentLeader: Option[String] = None
+                         node: Node,
+                         currentTerm: Long,
+                         votedFor: Option[Node] = None,
+                         currentLeader: Option[Node] = None
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
-    val (state, actions) = CandidateNode(nodeId, currentTerm, logState.lastTerm.getOrElse(0L)).onTimer(logState, config)
+    val (state, actions) = CandidateNode(node, currentTerm, logState.lastTerm.getOrElse(0L)).onTimer(logState, config)
 
     if (state.isInstanceOf[LeaderNode])
       (state, actions)
@@ -35,10 +35,10 @@ case class FollowerNode(
     if (logOK && termOK)
       (
         this.copy(currentTerm = msg.currentTerm, votedFor = Some(msg.nodeId)),
-        (VoteResponse(nodeId, msg.currentTerm, true), List(StoreState))
+        (VoteResponse(node, msg.currentTerm, true), List(StoreState))
       )
     else
-      (this, (VoteResponse(nodeId, currentTerm, false), List.empty))
+      (this, (VoteResponse(node, currentTerm, false), List.empty))
   }
 
   override def onReceive(logState: LogState, config: ClusterConfiguration, msg: VoteResponse): (NodeState, List[Action]) =
@@ -71,7 +71,7 @@ case class FollowerNode(
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
         (
-          AppendEntriesResponse(nodeId, currentTerm_, msg.logLength + msg.entries.length, true),
+          AppendEntriesResponse(node, currentTerm_, msg.logLength + msg.entries.length, true),
           stateChangedActions ::: leaderChangeActions
         )
       )
@@ -79,7 +79,7 @@ case class FollowerNode(
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
         (
-          AppendEntriesResponse(nodeId, currentTerm_, logState.appliedIndex.getOrElse(0), false),
+          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex.getOrElse(0), false),
           if (currentTerm == currentTerm_) List.empty else List(StoreState)
         )
       )
@@ -95,12 +95,12 @@ case class FollowerNode(
   override def onReplicateLog(config: ClusterConfiguration): List[Action] =
     List.empty
 
-  override def leader: Option[String] =
+  override def leader: Option[Node] =
     currentLeader
 
   override def toPersistedState: PersistedState =
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, config: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(nodeId, currentTerm, logState.length - 1, true))
+    (this, AppendEntriesResponse(node, currentTerm, logState.length - 1, true))
 }
