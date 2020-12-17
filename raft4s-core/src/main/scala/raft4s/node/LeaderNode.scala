@@ -75,7 +75,7 @@ case class LeaderNode(
 
         (
           this.copy(ackedLength = ackedLength_, sentLength = sentLength_),
-          List(CommitLogs(ackedLength_ + (nodeId -> logState.length), (cluster.members.size + 1) / 2))
+          List(CommitLogs(ackedLength_ + (nodeId -> logState.length)))
         )
 
       } else if (sentLength(msg.nodeId) > 0) {
@@ -93,7 +93,7 @@ case class LeaderNode(
   override def onReplicateLog(cluster: ClusterConfiguration): List[Action] =
     cluster.members
       .filterNot(_ == nodeId)
-      .map(peer => ReplicateLog(peer, currentTerm, sentLength(peer)))
+      .map(peer => ReplicateLog(peer, currentTerm, sentLength.getOrElse(peer, 0L)))
       .toList
 
   override def leader: Option[String] =

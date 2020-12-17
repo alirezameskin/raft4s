@@ -13,7 +13,7 @@ private[raft4s] class MembershipManager[F[_]: Monad](clusterConfiguration: Ref[F
   def members: F[Set[String]] =
     clusterConfiguration.get.map(_.members)
 
-  def changeConfiguration(newConfig: ClusterConfiguration): F[Unit] =
+  def setClusterConfiguration(newConfig: ClusterConfiguration): F[Unit] =
     clusterConfiguration.set(newConfig)
 
   def getClusterConfiguration: F[ClusterConfiguration] =

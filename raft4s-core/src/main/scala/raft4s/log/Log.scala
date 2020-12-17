@@ -85,14 +85,16 @@ class Log[F[_]: Monad: Logger](
       } yield ()
     }
 
-  def commitLogs(ackedLength: Map[String, Long], minAckes: Int): F[Unit] = {
-    val acked: Long => Boolean = index => ackedLength.count(_._2 >= index) >= minAckes
+  def commitLogs(ackedLength: Map[String, Long]): F[Unit] = {
+    def acked(config: ClusterConfiguration, index: Long): Boolean =
+      config.quorumReached(ackedLength.filter(_._2 >= index).keySet)
 
     semaphore.withPermit {
       for {
         logLength    <- logStorage.length
+        config       <- membershipManager.getClusterConfiguration
         appliedIndex <- stateMachine.appliedIndex
-        committed    <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
+        committed    <- (appliedIndex + 1 until logLength).filter(i => acked(config, i + 1)).toList.traverse(commit)
         _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
       } yield ()
     }
@@ -129,7 +131,14 @@ class Log[F[_]: Monad: Logger](
       (start until entries.length).map(i => entries(i.toInt)).toList
     } else List.empty
 
-    logEntries.traverse(entry => logStorage.put(entry.index, entry)) *> Monad[F].unit
+    logEntries.traverse { entry =>
+      entry.command match {
+        case command: ClusterConfigurationCommand =>
+          logStorage.put(entry.index, entry) *> membershipManager.setClusterConfiguration(command.toConfig)
+        case _ =>
+          logStorage.put(entry.index, entry) *> Monad[F].unit
+      }
+    } *> Monad[F].unit
   }
 
   private def commit(index: Long): F[Unit] =
@@ -141,8 +150,8 @@ class Log[F[_]: Monad: Logger](
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
     val output = command match {
-      case command: ClusterConfiguration =>
-        membershipManager.changeConfiguration(command)
+      case command: ClusterConfigurationCommand =>
+        membershipManager.setClusterConfiguration(command.toConfig)
 
       case command: ReadCommand[_] =>
         stateMachine.applyRead.apply(command)

@@ -5,7 +5,7 @@ import cats.effect.{Concurrent, Resource, Sync, Timer}
 import cats.implicits._
 import cats.{Applicative, Monad, MonadError, Parallel}
 import io.odin.Logger
-import raft4s.internal.{ErrorLogging, LeaderAnnouncer, LogReplicator, MembershipManager, RpcClientProvider}
+import raft4s.internal._
 import raft4s.log.{Log, LogCompactionPolicy}
 import raft4s.node._
 import raft4s.protocol._
@@ -123,10 +123,38 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     if (config.members.map(_.id).contains(member)) {
       Applicative[F].unit
     }
+
     val oldMembers = config.members.map(_.id).toSet
     val newMembers = oldMembers + member
+    val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
 
-    onCommand[Unit](JointConfiguration(oldMembers, newMembers))
+    for {
+      _ <- membershipManager.setClusterConfiguration(newConfig)
+      _ <- Logger[F].trace(s"Commiting a joint configuration ${newConfig}")
+      _ <- onCommand[Unit](JointConfigurationCommand(oldMembers, newMembers))
+      _ <- Logger[F].trace("Joint configuration is commited")
+      _ <- onCommand[Unit](NewConfigurationCommand(newMembers))
+      _ <- Logger[F].trace("New configuration is commited")
+    } yield ()
+  }
+
+  def removeMember(member: String): F[Unit] = {
+    if (!config.members.map(_.id).contains(member)) {
+      Applicative[F].unit
+    }
+
+    val oldMembers = config.members.map(_.id).toSet
+    val newMembers = oldMembers - member
+    val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
+
+    for {
+      _ <- membershipManager.setClusterConfiguration(newConfig)
+      _ <- Logger[F].trace(s"Commiting a joint configuration ${newConfig}")
+      _ <- onCommand[Unit](JointConfigurationCommand(oldMembers, newMembers))
+      _ <- Logger[F].trace("Joint configuration is commited")
+      _ <- onCommand[Unit](NewConfigurationCommand(newMembers))
+      _ <- Logger[F].trace("New configuration is commited")
+    } yield ()
   }
 
   def onCommand[T](command: Command[T]): F[T] =
@@ -149,14 +177,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
             _        <- runActions(actions)
             result   <- deferred.get
           } yield result
-
-        case cmd: ClusterConfigurationCommand =>
-          onConfigCommand(cmd)
       }
     }
-
-  private def onConfigCommand(command: ClusterConfigurationCommand): F[Unit] =
-    ???
 
   private def onReadCommand[T](node: NodeState, command: ReadCommand[T]): F[T] =
     node match {
@@ -184,23 +206,23 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
 
   private def onWriteCommand[T](
     node: NodeState,
-    config: ClusterConfiguration,
+    cluster: ClusterConfiguration,
     command: WriteCommand[T],
     deferred: Deferred[F, T]
   ): F[List[Action]] =
     node match {
       case LeaderNode(_, term, _, _) =>
-        if (config.members.isEmpty)
+        if (cluster.members.size == 1)
           for {
-            _ <- logger.trace("Appending the command to the log")
-            _ <- log.append(term, command, deferred)
-            _ <- log.commitLogs(Map.empty, 0)
+            _     <- logger.trace("Appending the command to the log")
+            entry <- log.append(term, command, deferred)
+            _     <- log.commitLogs(Map(config.local.id -> entry.index))
           } yield List.empty
         else
           for {
             _ <- logger.trace("Appending the command to the log")
             _ <- log.append(term, command, deferred)
-          } yield node.onReplicateLog(config)
+          } yield node.onReplicateLog(cluster)
 
       case _ =>
         for {
@@ -242,8 +264,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
           _    <- storage.stateStorage.persistState(node.toPersistedState)
         } yield ()
 
-      case CommitLogs(ackedLength, minAckes) =>
-        log.commitLogs(ackedLength, minAckes)
+      case CommitLogs(ackedLength) =>
+        log.commitLogs(ackedLength)
 
       case AnnounceLeader(leaderId, true) =>
         leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
@@ -318,7 +340,7 @@ object Raft {
   ): Resource[F, Raft[F]] =
     for {
       clientProvider <- RpcClientProvider.resource[F](config.members)
-      membership     <- Resource.liftF(MembershipManager.build[F](config.members.map(_.id).toSet))
+      membership     <- Resource.liftF(MembershipManager.build[F](config.members.map(_.id).toSet + config.local.id))
       log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership))
       replicator     <- Resource.liftF(LogReplicator.build[F](config.nodeId, clientProvider, log))
       announcer      <- Resource.liftF(LeaderAnnouncer.build[F])
