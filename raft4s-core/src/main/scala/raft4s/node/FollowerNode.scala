@@ -1,13 +1,14 @@
 package raft4s.node
 
+import raft4s.Node
 import raft4s.log.LogState
 import raft4s.protocol._
 
 case class FollowerNode(
-                         node: Node,
-                         currentTerm: Long,
-                         votedFor: Option[Node] = None,
-                         currentLeader: Option[Node] = None
+  node: Node,
+  currentTerm: Long,
+  votedFor: Option[Node] = None,
+  currentLeader: Option[Node] = None
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
@@ -79,7 +80,7 @@ case class FollowerNode(
       (
         this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
         (
-          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex.getOrElse(0), false),
+          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, false),
           if (currentTerm == currentTerm_) List.empty else List(StoreState)
         )
       )

@@ -3,7 +3,7 @@ package raft4s.rpc.grpc.io
 import _root_.io.grpc.ManagedChannelBuilder
 import cats.effect.IO
 import io.odin.Logger
-import raft4s.protocol.Node
+import raft4s.Node
 import raft4s.rpc.grpc.io.internal.GRPCRaftClient
 import raft4s.rpc.{RpcClient, RpcClientBuilder}
 

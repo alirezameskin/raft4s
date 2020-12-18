@@ -4,22 +4,23 @@ import cats.effect.Concurrent
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import io.odin.Logger
+import raft4s.Node
 import raft4s.log.Log
-import raft4s.protocol.{AppendEntriesResponse, Node}
+import raft4s.protocol.AppendEntriesResponse
 import raft4s.storage.Snapshot
 
 import scala.collection.Set
 
 private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
-                                                               leaderId: Node,
-                                                               log: Log[F],
-                                                               clients: RpcClientProvider[F],
-                                                               installing: Ref[F, Set[Node]]
+  leaderId: Node,
+  log: Log[F],
+  clients: RpcClientProvider[F],
+  installing: Ref[F, Set[Node]]
 ) {
 
   def replicatedLogs(peerId: Node, term: Long, sentLength: Long): F[AppendEntriesResponse] =
     for {
-      _        <- Logger[F].trace(s"Replicating logs to to ${peerId}. Term: ${term}, sentLength : ${sentLength}")
+      _        <- Logger[F].trace(s"Replicating logs to ${peerId}. Term: ${term}, sentLength : ${sentLength}")
       _        <- snapshotIsNotInstalling(peerId)
       snapshot <- log.latestSnapshot
       response <-
@@ -28,6 +29,10 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
         else
           log
             .getAppendEntries(leaderId, term, sentLength)
+            .map { entries =>
+              println(s"Append entries ${entries}")
+              entries
+            }
             .flatMap(request => clients.send(peerId, request))
 
     } yield response

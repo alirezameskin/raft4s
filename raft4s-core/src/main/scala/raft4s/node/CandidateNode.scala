@@ -1,14 +1,15 @@
 package raft4s.node
 
+import raft4s.Node
 import raft4s.log.LogState
 import raft4s.protocol.{PersistedState, _}
 
 case class CandidateNode(
-                          node: Node,
-                          currentTerm: Long,
-                          lastTerm: Long,
-                          votedFor: Option[Node] = None,
-                          votedReceived: Set[Node] = Set.empty
+  node: Node,
+  currentTerm: Long,
+  lastTerm: Long,
+  votedFor: Option[Node] = None,
+  votedReceived: Set[Node] = Set.empty
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
@@ -61,7 +62,7 @@ case class CandidateNode(
       (FollowerNode(node, msg.term), List(StoreState))
     else if (msg.term == currentTerm && msg.granted && votedReceived_.size >= quorumSize) {
       val ackedLength = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
-      val sentLength  = config.members.filterNot(_ == node).map(n => (n, logState.appliedIndex.getOrElse(0L))).toMap
+      val sentLength  = config.members.filterNot(_ == node).map(n => (n, logState.appliedIndex)).toMap
       val actions     = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
 
       (LeaderNode(node, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(node) :: actions)
@@ -94,7 +95,7 @@ case class CandidateNode(
       (
         this.copy(currentTerm = currentTerm_),
         (
-          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex.getOrElse(0), false),
+          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, false),
           if (currentTerm == currentTerm_) List.empty else List(StoreState)
         )
       )
@@ -117,5 +118,5 @@ case class CandidateNode(
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, cluster: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(node, currentTerm, logState.appliedIndex.getOrElse(0), false))
+    (this, AppendEntriesResponse(node, currentTerm, logState.appliedIndex, false))
 }

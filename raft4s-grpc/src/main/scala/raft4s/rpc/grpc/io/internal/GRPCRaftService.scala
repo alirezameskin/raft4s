@@ -2,10 +2,18 @@ package raft4s.rpc.grpc.io.internal
 
 import cats.effect.IO
 import io.odin.Logger
-import raft4s.Raft
+import raft4s.{Node, Raft}
 import raft4s.grpc.protos
-import raft4s.grpc.protos.{AddMemberRequest, AddMemberResponse, CommandRequest, CommandResponse, InstallSnapshotRequest, RemoveMemberRequest, RemoveMemberResponse}
-import raft4s.protocol.{AppendEntries, Command, InstallSnapshot, LogEntry, Node, VoteRequest}
+import raft4s.grpc.protos.{
+  AddMemberRequest,
+  AddMemberResponse,
+  CommandRequest,
+  CommandResponse,
+  InstallSnapshotRequest,
+  RemoveMemberRequest,
+  RemoveMemberResponse
+}
+import raft4s.protocol.{AppendEntries, Command, InstallSnapshot, LogEntry, VoteRequest}
 import raft4s.storage.Snapshot
 
 import java.nio.ByteBuffer

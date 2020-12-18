@@ -10,7 +10,7 @@ import raft4s.log.{Log, LogCompactionPolicy}
 import raft4s.node._
 import raft4s.protocol._
 import raft4s.rpc._
-import raft4s.storage.{StateStorage, Storage}
+import raft4s.storage.Storage
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
@@ -46,6 +46,33 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       } yield leader
     }
 
+  def join(node: Node): F[Node] =
+    errorLogging("Joining to a cluster") {
+      for {
+        _      <- logger.info("Cluster is joining")
+        st     <- state.get
+        _      <- logger.trace(s"State ${st}")
+        res    <- clientProvider.addMember(node, config.local)
+        _      <- logger.trace(s"CLuster is joined to ${node} ${res}")
+        node   <- state.get
+        _      <- if (node.leader.isDefined) Monad[F].unit else runElection()
+        _      <- scheduleElection()
+        _      <- scheduleReplication()
+        _      <- logger.trace("Waiting for the leader to be elected.")
+        leader <- leaderAnnouncer.listen()
+        _      <- logger.info(s"A Leader is elected. Leader: '${leader}'")
+      } yield leader
+    }
+
+  def leave(): F[Unit] =
+    errorLogging("Leaving a cluster") {
+      for {
+        _ <- logger.info(s"Node ${config.local} is leaving the cluster")
+        _ <- removeMember(config.local)
+        _ <- logger.info(s"Node ${config.local} left the cluster.")
+      } yield ()
+    }
+
   def listen(): F[Node] =
     errorLogging("Waiting for the Leader to be elected") {
       leaderAnnouncer.listen()
@@ -56,6 +83,8 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       for {
         _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
         logState <- log.state
+        ss       <- state.get
+        _        <- logger.trace(s"Current state ${ss}")
         config   <- membershipManager.getClusterConfiguration
         result   <- state.modify(_.onReceive(logState, config, msg))
 
@@ -84,6 +113,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         logState <- log.state
         config   <- membershipManager.getClusterConfiguration
         current  <- state.get
+        _        <- logger.trace(s"Current state ${current}")
         time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
         _        <- lastHeartbeat.set(time)
 
@@ -119,12 +149,18 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       } yield response
     }
 
-  def addMember(member: Node): F[Unit] = {
-    if (config.members.map(_.id).contains(member)) {
+  def addMember(member: Node): F[Unit] =
+    for {
+      config <- membershipManager.getClusterConfiguration
+      _      <- addMember(config, member)
+    } yield ()
+
+  private def addMember(config: ClusterConfiguration, member: Node): F[Unit] = {
+    if (config.members.contains(member)) {
       Applicative[F].unit
     }
 
-    val oldMembers = config.members.toSet
+    val oldMembers = config.members
     val newMembers = oldMembers + member
     val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
 
@@ -138,8 +174,14 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     } yield ()
   }
 
-  def removeMember(member: Node): F[Unit] = {
-    if (!config.members.map(_.id).contains(member)) {
+  def removeMember(member: Node): F[Unit] =
+    for {
+      config <- membershipManager.getClusterConfiguration
+      _      <- removeMember(config, member)
+    } yield ()
+
+  private def removeMember(config: ClusterConfiguration, member: Node): F[Unit] = {
+    if (!config.members.contains(member)) {
       Applicative[F].unit
     }
 
@@ -214,13 +256,15 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       case LeaderNode(_, term, _, _) =>
         if (cluster.members.size == 1)
           for {
-            _     <- logger.trace("Appending the command to the log")
-            entry <- log.append(term, command, deferred)
-            _     <- log.commitLogs(Map(config.local -> entry.index))
+            _         <- logger.trace(s"Appending the command to the log -  ${cluster.members}")
+            entry     <- log.append(term, command, deferred)
+            _         <- logger.trace(s"Entry appended ${entry}")
+            committed <- log.commitLogs(Map(config.local -> (entry.index + 1)))
+            _         <- if (committed) storeState() else Monad[F].unit
           } yield List.empty
         else
           for {
-            _ <- logger.trace("Appending the command to the log")
+            _ <- logger.trace(s"Appending the command to the log ${cluster.members}")
             _ <- log.append(term, command, deferred)
           } yield node.onReplicateLog(cluster)
 
@@ -258,25 +302,32 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         }
 
       case StoreState =>
-        for {
-          _    <- logger.trace("Storing the new state in the storage")
-          node <- state.get
-          _    <- storage.stateStorage.persistState(node.toPersistedState)
-        } yield ()
+        storeState()
 
       case CommitLogs(ackedLength) =>
-        log.commitLogs(ackedLength)
+        for {
+          committed <- log.commitLogs(ackedLength)
+          _         <- if (committed) storeState() else Monad[F].unit
+        } yield ()
 
       case AnnounceLeader(leaderId, true) =>
         leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
 
       case AnnounceLeader(leaderId, false) =>
-        leaderAnnouncer.announce(leaderId)
+        logger.trace("Anouncing a new leader without resetting ") *> leaderAnnouncer.announce(leaderId)
 
       case ResetLeaderAnnouncer =>
         leaderAnnouncer.reset()
 
     }
+
+  private def storeState(): F[Unit] =
+    for {
+      _        <- logger.trace("Storing the new state in the storage")
+      logState <- log.state
+      node     <- state.get
+      _        <- storage.stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.appliedIndex))
+    } yield ()
 
   private def runElection(): F[Unit] =
     for {
@@ -339,18 +390,20 @@ object Raft {
     compactionPolicy: LogCompactionPolicy[F]
   ): Resource[F, Raft[F]] =
     for {
+      persistedState <- Resource.liftF(storage.stateStorage.retrieveState())
+
+      appliedIndex = persistedState.map(_.appliedIndex).getOrElse(-1L)
+      state        = FollowerNode(config.local, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
+
       clientProvider <- RpcClientProvider.resource[F](config.members)
       membership     <- Resource.liftF(MembershipManager.build[F](config.members.toSet + config.local))
-      log            <- Resource.liftF(Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership))
-      replicator     <- Resource.liftF(LogReplicator.build[F](config.local, clientProvider, log))
-      announcer      <- Resource.liftF(LeaderAnnouncer.build[F])
-      heartbeat      <- Resource.liftF(Ref.of[F, Long](0L))
-      state          <- Resource.liftF(latestState(config, storage.stateStorage))
-      ref            <- Resource.liftF(Ref.of[F, NodeState](state))
+      log <- Resource.liftF(
+        Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
+      )
+      replicator <- Resource.liftF(LogReplicator.build[F](config.local, clientProvider, log))
+      announcer  <- Resource.liftF(LeaderAnnouncer.build[F])
+      heartbeat  <- Resource.liftF(Ref.of[F, Long](0L))
+      ref        <- Resource.liftF(Ref.of[F, NodeState](state))
     } yield new Raft[F](config, membership, clientProvider, announcer, replicator, log, storage, ref, heartbeat)
 
-  private def latestState[F[_]: Monad](config: Configuration, storage: StateStorage[F]): F[FollowerNode] =
-    for {
-      persisted <- storage.retrieveState()
-    } yield FollowerNode(config.local, persisted.map(_.term).getOrElse(0L), persisted.flatMap(_.votedFor))
 }

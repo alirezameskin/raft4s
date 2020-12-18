@@ -5,7 +5,7 @@ import cats.effect.Concurrent
 import cats.effect.concurrent.{Deferred, Ref}
 import cats.implicits._
 import io.odin.Logger
-import raft4s.protocol.Node
+import raft4s.Node
 
 private[raft4s] class LeaderAnnouncer[F[_]: Monad: Concurrent: Logger](
   val announcer: Ref[F, Deferred[F, Node]]

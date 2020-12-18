@@ -1,5 +1,6 @@
 package raft4s.node
 
+import raft4s.Node
 import raft4s.log.LogState
 import raft4s.protocol._
 

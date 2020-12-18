@@ -1,4 +1,4 @@
-package raft4s.protocol
+package raft4s
 
 case class Node(host: String, port: Int) {
   override def toString: String = id
@@ -6,10 +6,9 @@ case class Node(host: String, port: Int) {
 }
 
 object Node {
-  def fromString(str: String): Option[Node] = {
+  def fromString(str: String): Option[Node] =
     str.split(":") match {
       case Array(host, ip) => Some(Node(host, ip.toInt))
-      case _ => None
+      case _               => None
     }
-  }
 }

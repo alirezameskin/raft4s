@@ -1,13 +1,14 @@
 package raft4s.node
 
+import raft4s.Node
 import raft4s.log.LogState
 import raft4s.protocol._
 
 case class LeaderNode(
-                       node: Node,
-                       currentTerm: Long,
-                       ackedLength: Map[Node, Long],
-                       sentLength: Map[Node, Long]
+  node: Node,
+  currentTerm: Long,
+  ackedLength: Map[Node, Long],
+  sentLength: Map[Node, Long]
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) =
@@ -25,7 +26,7 @@ case class LeaderNode(
     if (logOK && termOK)
       (
         FollowerNode(node, msg.currentTerm, Some(msg.nodeId)),
-        (VoteResponse(node, msg.currentTerm, true), List(StoreState))
+        (VoteResponse(node, msg.currentTerm, true), List(StoreState, ResetLeaderAnnouncer))
       )
     else {
 
@@ -68,8 +69,9 @@ case class LeaderNode(
     cluster: ClusterConfiguration,
     msg: AppendEntriesResponse
   ): (NodeState, List[Action]) =
-    if (msg.currentTerm == currentTerm)
-      if (msg.success && msg.ack >= ackedLength(msg.nodeId)) {
+    if (msg.currentTerm == currentTerm) {
+
+      if (msg.success && msg.ack >= ackedLength.getOrElse(msg.nodeId, 0L)) {
         val sentLength_  = sentLength + (msg.nodeId  -> msg.ack)
         val ackedLength_ = ackedLength + (msg.nodeId -> msg.ack)
 
@@ -78,14 +80,15 @@ case class LeaderNode(
           List(CommitLogs(ackedLength_ + (node -> logState.length)))
         )
 
-      } else if (sentLength(msg.nodeId) > 0) {
-        val sentLength_ = sentLength + (msg.nodeId -> (sentLength(msg.nodeId) - 1))
+      } else if (sentLength.getOrElse(msg.nodeId, 0L) > 0) {
+        val sentLength_ = sentLength + (msg.nodeId -> (sentLength.getOrElse(msg.nodeId, 0L) - 1))
         val actions     = List(ReplicateLog(msg.nodeId, currentTerm, sentLength_(msg.nodeId)))
 
         (this.copy(sentLength = sentLength_), actions)
       } else
         (this, List.empty)
-    else if (msg.currentTerm > currentTerm)
+
+    } else if (msg.currentTerm > currentTerm)
       (FollowerNode(node, msg.currentTerm), List(StoreState))
     else
       (this, List.empty)

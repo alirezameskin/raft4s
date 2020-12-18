@@ -5,6 +5,7 @@ import cats.effect.concurrent.Ref
 import cats.implicits._
 import cats.{Monad, MonadError}
 import io.odin.Logger
+import raft4s.Node
 import raft4s.protocol._
 import raft4s.rpc.{RpcClient, RpcClientBuilder}
 import raft4s.storage.Snapshot
@@ -12,7 +13,8 @@ import raft4s.storage.Snapshot
 private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   val clients: Ref[F, Map[Node, RpcClient[F]]],
   val members: Seq[Node]
-)(implicit ME: MonadError[F, Throwable]) {
+)(implicit ME: MonadError[F, Throwable])
+    extends ErrorLogging[F] {
 
   def send(serverId: Node, voteRequest: VoteRequest): F[VoteResponse] =
     for {
@@ -22,11 +24,15 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
     } yield result
 
   def send(serverId: Node, appendEntries: AppendEntries): F[AppendEntriesResponse] =
-    for {
-      client  <- getClient(serverId)
-      attempt <- client.send(appendEntries).attempt
-      result  <- logErrors(serverId, attempt)
-    } yield result
+    errorLogging("Sending AppendEtrries") {
+      for {
+        client  <- getClient(serverId)
+        _       <- Logger[F].trace(s"Sending request ${appendEntries} to ${serverId} client: ${client}")
+        attempt <- client.send(appendEntries).attempt
+        _       <- Logger[F].trace(s"Attempt ${attempt}")
+        result  <- logErrors(serverId, attempt)
+      } yield result
+    }
 
   def send(serverId: Node, snapshot: Snapshot, lastEntry: LogEntry): F[AppendEntriesResponse] =
     for {
@@ -39,6 +45,20 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
     for {
       client  <- getClient(serverId)
       attempt <- client.send(command).attempt
+      result  <- logErrors(serverId, attempt)
+    } yield result
+
+  def addMember(serverId: Node, newNode: Node): F[Boolean] =
+    for {
+      client  <- getClient(serverId)
+      attempt <- client.addMember(newNode).attempt
+      result  <- logErrors(serverId, attempt)
+    } yield result
+
+  def removeMember(serverId: Node, removedNode: Node): F[Boolean] =
+    for {
+      client  <- getClient(serverId)
+      attempt <- client.removeMember(removedNode).attempt
       result  <- logErrors(serverId, attempt)
     } yield result
 
@@ -58,7 +78,7 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
         if (possibleClient.isDefined)
           Monad[F].pure(possibleClient.get)
         else {
-          val c            = implicitly[RpcClientBuilder[F]].build(serverId)
+          val c = implicitly[RpcClientBuilder[F]].build(serverId)
           clients.updateAndGet(_ + (serverId -> c)) *> Monad[F].pure(c)
 
         }

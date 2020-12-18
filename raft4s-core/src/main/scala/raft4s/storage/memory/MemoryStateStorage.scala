@@ -6,9 +6,11 @@ import raft4s.storage.StateStorage
 
 class MemoryStateStorage[F[_]: Monad] extends StateStorage[F] {
 
-  override def persistState(state: PersistedState): F[Unit] = Monad[F].unit
+  override def persistState(state: PersistedState): F[Unit] =
+    Monad[F].unit
 
-  override def retrieveState(): F[Option[PersistedState]] = Monad[F].pure(Some(PersistedState(0, None)))
+  override def retrieveState(): F[Option[PersistedState]] =
+    Monad[F].pure(Some(PersistedState(0, None, -1L)))
 
 }
 

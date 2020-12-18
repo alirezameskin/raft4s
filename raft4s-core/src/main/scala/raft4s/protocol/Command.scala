@@ -1,5 +1,7 @@
 package raft4s.protocol
 
+import raft4s.Node
+
 sealed trait Command[OUT] extends Serializable
 trait ReadCommand[OUT]    extends Command[OUT]
 trait WriteCommand[OUT]   extends Command[OUT]

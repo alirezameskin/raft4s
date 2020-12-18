@@ -4,6 +4,7 @@ import cats.effect.{ContextShift, IO}
 import com.google.protobuf
 import io.grpc.ManagedChannel
 import io.odin.Logger
+import raft4s.Node
 import raft4s.grpc.protos
 import raft4s.grpc.protos.{AddMemberRequest, RemoveMemberRequest}
 import raft4s.protocol._
@@ -11,7 +12,7 @@ import raft4s.rpc.RpcClient
 import raft4s.storage.Snapshot
 
 import java.util.concurrent.TimeUnit
-import scala.concurrent.{ExecutionContext, blocking}
+import scala.concurrent.{blocking, ExecutionContext}
 
 private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit
   CS: ContextShift[IO],
@@ -91,16 +92,17 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
       }
   }
 
-  override def addMember(server: String): IO[Boolean] =
+  override def addMember(node: Node): IO[Boolean] = {
+    println(s"sending add member request to ${}")
     IO
-      .fromFuture(IO(stub.addMember(AddMemberRequest(server))))
+      .fromFuture(IO(stub.addMember(AddMemberRequest(node.host, node.port))))
       .map(_ => true)
+  }
 
-  override def removeMember(server: String): IO[Boolean] =
+  override def removeMember(node: Node): IO[Boolean] =
     IO
-      .fromFuture(IO(stub.removeMember(RemoveMemberRequest(server))))
+      .fromFuture(IO(stub.removeMember(RemoveMemberRequest(node.host, node.port))))
       .map(_ => true)
-
 
   override def close(): IO[Unit] =
     IO.delay {

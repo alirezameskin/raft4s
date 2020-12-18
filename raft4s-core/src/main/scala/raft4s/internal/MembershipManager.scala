@@ -4,7 +4,8 @@ import cats.Monad
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import cats.implicits._
-import raft4s.protocol.{ClusterConfiguration, NewClusterConfiguration, Node}
+import raft4s.Node
+import raft4s.protocol.{ClusterConfiguration, NewClusterConfiguration}
 
 import scala.collection.immutable.Set
 
@@ -18,6 +19,7 @@ private[raft4s] class MembershipManager[F[_]: Monad](clusterConfiguration: Ref[F
 
   def getClusterConfiguration: F[ClusterConfiguration] =
     clusterConfiguration.get
+
 }
 
 object MembershipManager {

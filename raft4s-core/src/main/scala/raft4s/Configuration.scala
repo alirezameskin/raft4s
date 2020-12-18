@@ -1,7 +1,5 @@
 package raft4s
 
-import raft4s.protocol.Node
-
 case class Configuration(
   local: Node,
   members: Seq[Node] = List.empty,

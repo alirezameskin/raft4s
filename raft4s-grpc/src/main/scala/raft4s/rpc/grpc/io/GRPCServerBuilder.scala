@@ -4,10 +4,9 @@ import _root_.io.grpc.{Server, ServerBuilder}
 import cats.effect.{IO, Resource}
 import io.odin.Logger
 import raft4s.grpc.protos
-import raft4s.protocol.Node
 import raft4s.rpc.grpc.io.internal.GRPCRaftService
 import raft4s.rpc.{RpcServer, RpcServerBuilder}
-import raft4s.{ Raft}
+import raft4s.{Node, Raft}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
