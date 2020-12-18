@@ -48,17 +48,10 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
       result  <- logErrors(serverId, attempt)
     } yield result
 
-  def addMember(serverId: Node, newNode: Node): F[Boolean] =
+  def join(serverId: Node, newNode: Node): F[Boolean] =
     for {
       client  <- getClient(serverId)
-      attempt <- client.addMember(newNode).attempt
-      result  <- logErrors(serverId, attempt)
-    } yield result
-
-  def removeMember(serverId: Node, removedNode: Node): F[Boolean] =
-    for {
-      client  <- getClient(serverId)
-      attempt <- client.removeMember(removedNode).attempt
+      attempt <- client.join(newNode).attempt
       result  <- logErrors(serverId, attempt)
     } yield result
 

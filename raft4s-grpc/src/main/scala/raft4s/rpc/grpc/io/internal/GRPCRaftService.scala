@@ -4,15 +4,7 @@ import cats.effect.IO
 import io.odin.Logger
 import raft4s.{Node, Raft}
 import raft4s.grpc.protos
-import raft4s.grpc.protos.{
-  AddMemberRequest,
-  AddMemberResponse,
-  CommandRequest,
-  CommandResponse,
-  InstallSnapshotRequest,
-  RemoveMemberRequest,
-  RemoveMemberResponse
-}
+import raft4s.grpc.protos.{CommandRequest, CommandResponse, InstallSnapshotRequest, JoinRequest, JoinResponse}
 import raft4s.protocol.{AppendEntries, Command, InstallSnapshot, LogEntry, VoteRequest}
 import raft4s.storage.Snapshot
 
@@ -72,16 +64,10 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
       }
       .unsafeToFuture()
 
-  override def addMember(request: AddMemberRequest): Future[AddMemberResponse] =
+  override def join(request: JoinRequest): Future[JoinResponse] =
     raft
       .addMember(Node(request.host, request.port))
-      .map(_ => AddMemberResponse())
-      .unsafeToFuture()
-
-  override def removeMember(request: RemoveMemberRequest): Future[RemoveMemberResponse] =
-    raft
-      .removeMember(Node(request.host, request.port))
-      .map(_ => RemoveMemberResponse())
+      .map(_ => JoinResponse())
       .unsafeToFuture()
 
   private def toNode(str: String): Node = Node.fromString(str).get //TODO

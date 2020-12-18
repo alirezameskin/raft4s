@@ -52,7 +52,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         _      <- logger.info("Cluster is joining")
         st     <- state.get
         _      <- logger.trace(s"State ${st}")
-        res    <- clientProvider.addMember(node, config.local)
+        res    <- clientProvider.join(node, config.local)
         _      <- logger.trace(s"CLuster is joined to ${node} ${res}")
         node   <- state.get
         _      <- if (node.leader.isDefined) Monad[F].unit else runElection()
@@ -352,19 +352,23 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     }
   }
 
-  private def scheduleElection(): F[Unit] = {
-    val scheduled = for {
-      _    <- Timer[F].sleep(FiniteDuration(config.heartbeatTimeoutMillis, TimeUnit.MILLISECONDS))
-      now  <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-      lh   <- lastHeartbeat.get
-      node <- state.get
-      _    <- if (!node.isInstanceOf[LeaderNode] && now - lh > config.heartbeatTimeoutMillis) runElection() else Monad[F].unit
-    } yield ()
-
+  private def scheduleElection(): F[Unit] =
     background {
-      Monad[F].foreverM(scheduled)
+      Monad[F].foreverM {
+        for {
+          _     <- Timer[F].sleep(FiniteDuration(config.heartbeatTimeoutMillis, TimeUnit.MILLISECONDS))
+          alive <- isLeaderStillAlive
+          _     <- if (alive) Monad[F].unit else runElection()
+        } yield ()
+      }
     }
-  }
+
+  private def isLeaderStillAlive: F[Boolean] =
+    for {
+      node <- state.get
+      lh   <- lastHeartbeat.get
+      now  <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
+    } yield node.isInstanceOf[LeaderNode] || (now - lh < config.heartbeatTimeoutMillis)
 
   private def background[A](fa: F[A]): F[Unit] =
     Concurrent[F].start(fa) *> Monad[F].unit

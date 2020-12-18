@@ -13,9 +13,7 @@ trait RpcClient[F[_]] {
 
   def send(snapshot: Snapshot, lastEntry: LogEntry): F[AppendEntriesResponse]
 
-  def addMember(server: Node): F[Boolean]
-
-  def removeMember(server: Node): F[Boolean]
+  def join(server: Node): F[Boolean]
 
   def close(): F[Unit]
 }

@@ -6,7 +6,7 @@ import io.grpc.ManagedChannel
 import io.odin.Logger
 import raft4s.Node
 import raft4s.grpc.protos
-import raft4s.grpc.protos.{AddMemberRequest, RemoveMemberRequest}
+import raft4s.grpc.protos.JoinRequest
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
 import raft4s.storage.Snapshot
@@ -23,8 +23,11 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
   val stub = protos.RaftGrpc.stub(channel)
 
   override def send(req: VoteRequest): IO[VoteResponse] = {
-    val request  = protos.VoteRequest(req.nodeId.id, req.currentTerm, req.logLength, req.logTerm)
-    val response = stub.vote(request).map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
+    val request = protos.VoteRequest(req.nodeId.id, req.currentTerm, req.logLength, req.logTerm)
+    val response =
+      stub
+        .vote(request)
+        .map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
 
     IO
       .fromFuture(IO(response))
@@ -61,7 +64,7 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
 
   override def send[T](command: Command[T]): IO[T] = {
     val request  = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
-    val response = stub.execute(request).map(response => ObjectSerializer.decode[T](response.outpue))
+    val response = stub.execute(request).map(response => ObjectSerializer.decode[T](response.output))
 
     IO
       .fromFuture(IO(response))
@@ -92,16 +95,9 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
       }
   }
 
-  override def addMember(node: Node): IO[Boolean] = {
-    println(s"sending add member request to ${}")
+  override def join(node: Node): IO[Boolean] =
     IO
-      .fromFuture(IO(stub.addMember(AddMemberRequest(node.host, node.port))))
-      .map(_ => true)
-  }
-
-  override def removeMember(node: Node): IO[Boolean] =
-    IO
-      .fromFuture(IO(stub.removeMember(RemoveMemberRequest(node.host, node.port))))
+      .fromFuture(IO(stub.join(JoinRequest(node.host, node.port))))
       .map(_ => true)
 
   override def close(): IO[Unit] =
@@ -114,4 +110,6 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
     }
 
   private def toNode(str: String): Node = Node.fromString(str).get //TODO
+
+  private def toNode(info: protos.NodeInfo): Node = Node(info.host, info.port)
 }
