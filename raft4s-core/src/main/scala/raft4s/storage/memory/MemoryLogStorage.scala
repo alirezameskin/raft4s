@@ -10,7 +10,7 @@ class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
 
   private val map = mutable.TreeMap.empty[Long, LogEntry]
 
-  override def length: F[Long] =
+  override def lastIndex: F[Long] =
     Monad[F].pure(map.size)
 
   override def get(index: Long): F[LogEntry] =

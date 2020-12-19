@@ -5,8 +5,8 @@ import raft4s.Node
 case class AppendEntries(
   leaderId: Node,
   term: Long,
-  logLength: Long,
-  logTerm: Long,
-  leaderAppliedIndex: Long,
+  prevLogIndex: Long,
+  prevLogTerm: Long,
+  leaderCommit: Long,
   entries: List[LogEntry]
 )

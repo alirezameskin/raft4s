@@ -27,16 +27,25 @@ case class FollowerNode(
     config: ClusterConfiguration,
     msg: VoteRequest
   ): (NodeState, (VoteResponse, List[Action])) = {
+    if (msg.term < currentTerm) {
+      (this, (VoteResponse(node, msg.term, false)))
+    } else if (votedFor.isEmpty || votedFor.contains(msg.nodeId)) {
+      if (msg.lastLogIndex >= logState.lastIndex && msg.lastLogTerm >= logState.lastTerm.getOrElse(0L)) {
+        (VoteResponse(node, msg.term, true), List(StoreState))
+      } else {
+        (this, (VoteResponse(node, msg.term, false)))
+      }
+    }
 
     val myLogTerm = logState.lastTerm.getOrElse(0L)
-    val logOK     = (msg.logTerm > myLogTerm) || (msg.logTerm == myLogTerm && msg.logLength >= logState.length)
+    val logOK     = (msg.lastLogTerm > myLogTerm) || (msg.lastLogTerm == myLogTerm && msg.lastLogIndex >= logState.lastIndex)
     val termOK =
-      (msg.currentTerm > currentTerm) || (msg.currentTerm == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
+      (msg.term > currentTerm) || (msg.term == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
 
     if (logOK && termOK)
       (
-        this.copy(currentTerm = msg.currentTerm, votedFor = Some(msg.nodeId)),
-        (VoteResponse(node, msg.currentTerm, true), List(StoreState))
+        this.copy(currentTerm = msg.term, votedFor = Some(msg.nodeId)),
+        (VoteResponse(node, msg.term, true), List(StoreState))
       )
     else
       (this, (VoteResponse(node, currentTerm, false), List.empty))
@@ -48,76 +57,47 @@ case class FollowerNode(
   override def onReceive(
     logState: LogState,
     config: ClusterConfiguration,
-    msg: AppendEntries
-  ): (NodeState, (AppendEntriesResponse, List[Action])) = {
-    val currentTerm_ = if (msg.term > currentTerm) msg.term else currentTerm
-    val votedFor_    = if (msg.term > currentTerm) None else votedFor
-
-    val logOK_ = logState.length >= msg.logLength
-    val logOK = if (logOK_ && msg.logLength > 0) { logState.lastTerm.contains(msg.logTerm) }
-    else logOK_
-
-    if (msg.term == currentTerm_ && logOK) {
-
-      val leaderChangeActions =
-        if (currentLeader.isEmpty)
-          List(AnnounceLeader(msg.leaderId))
-        else if (currentLeader.contains(msg.leaderId))
-          List.empty
-        else
-          List(AnnounceLeader(msg.leaderId, true))
-
-      val stateChangedActions = if (currentTerm != currentTerm_) List(StoreState) else List.empty
-
-      (
-        this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
-        (
-          AppendEntriesResponse(node, currentTerm_, msg.logLength + msg.entries.length, true),
-          stateChangedActions ::: leaderChangeActions
-        )
-      )
+    msg: AppendEntries,
+    localPrevLogEntry: Option[LogEntry]
+  ): (NodeState, (AppendEntriesResponse, List[Action])) =
+    if (msg.term < currentTerm) {
+      (this, (AppendEntriesResponse(node, currentTerm, msg.prevLogIndex, false), List.empty))
     } else {
-      if (msg.logLength == logState.appliedIndex) {
+      if (msg.term > currentTerm) {
+        val nextState = this.copy(currentTerm = msg.term, currentLeader = Some(msg.leaderId))
+        val actions =
+          if (currentLeader.isEmpty)
+            List(StoreState, AnnounceLeader(msg.leaderId))
+          else if (currentLeader.contains(msg.leaderId))
+            List(StoreState)
+          else
+            List(StoreState, AnnounceLeader(msg.leaderId, true))
 
-        (
-          this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
-          (
-            AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, true),
-            if (currentTerm == currentTerm_) List.empty else List(StoreState)
-          )
-        )
+        if (localPrevLogEntry.isEmpty)
+          (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+        else if (localPrevLogEntry.isDefined && localPrevLogEntry.get.term != msg.prevLogTerm)
+          (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+        else
+          (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex + msg.entries.length, true), actions))
 
-      } else if (msg.logLength < logState.appliedIndex) {
-        msg.entries.find(_.index == logState.appliedIndex) match {
-          case Some(entry) if logState.lastTerm.contains(entry.term) =>
-            (
-              this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
-              (
-                AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, true),
-                if (currentTerm == currentTerm_) List.empty else List(StoreState)
-              )
-            )
-
-          case _ =>
-            (
-              this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
-              (
-                AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, false),
-                if (currentTerm == currentTerm_) List.empty else List(StoreState)
-              )
-            )
-        }
       } else {
-        (
-          this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
-          (
-            AppendEntriesResponse(node, currentTerm_, Math.min(logState.length, msg.logLength), false),
-            if (currentTerm == currentTerm_) List.empty else List(StoreState)
-          )
-        )
+
+        val (nextState, actions) =
+          if (currentLeader.isEmpty)
+            (this.copy(currentLeader = Some(msg.leaderId)), List(AnnounceLeader(msg.leaderId)))
+          else if (currentLeader.contains(msg.leaderId))
+            (this, List.empty)
+          else
+            (this.copy(currentLeader = Some(msg.leaderId)), List(AnnounceLeader(msg.leaderId, true)))
+
+        if (localPrevLogEntry.isEmpty)
+          (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+        else if (localPrevLogEntry.isDefined && localPrevLogEntry.get.term != msg.prevLogTerm) {
+          (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+        } else
+          (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex + msg.entries.length, true), actions))
       }
     }
-  }
 
   override def onReceive(
     logState: LogState,
@@ -136,5 +116,5 @@ case class FollowerNode(
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, config: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(node, currentTerm, logState.length - 1, true))
+    (this, AppendEntriesResponse(node, currentTerm, logState.lastIndex - 1, true))
 }

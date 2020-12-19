@@ -102,8 +102,8 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedState = LeaderNode(
       node1,
       10,
-      sentLength = Map(node2 -> 0, node3 -> 0),
-      ackedLength = Map(node2 -> 100, node3 -> 100)
+      nextIndex = Map(node2 -> 101, node3 -> 101),
+      matchIndex = Map(node2 -> 0, node3 -> 0)
     )
 
     val expectedActions =
@@ -113,28 +113,34 @@ class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
   }
 
   it should "turn to a Follower node after receiving an AppendEntries request with higher Term" in {
+
+    val command  = new WriteCommand[String] {}
     val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
+    val prevLog  = LogEntry(10, 100, command)
 
-    val command = new WriteCommand[String] {}
     val request =
-      AppendEntries(node2, term = 11, logLength = 100, logTerm = 10, leaderAppliedIndex = 100, List(LogEntry(11, 101, command)))
+      AppendEntries(node2, term = 11, prevLogIndex = 100, prevLogTerm = 10, leaderCommit = 100, List(LogEntry(11, 101, command)))
 
     val expectedResponse = AppendEntriesResponse(node1, 11, 101, true)
     val expectedState    = FollowerNode(node1, 11, None, Some(node2))
 
     node
-      .onReceive(logState, config, request) shouldBe (expectedState, (expectedResponse, List(StoreState, AnnounceLeader(node2))))
+      .onReceive(logState, config, request, Some(prevLog)) shouldBe (expectedState, (
+      expectedResponse,
+      List(StoreState, AnnounceLeader(node2))
+    ))
   }
 
   it should "stays in Candidate state and reject the AppendEntries request after receiving AppendEntries with lower Term" in {
     val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10), 0)
+    val command  = new WriteCommand[String] {}
+    val prevLog  = Some(LogEntry(10, 99, command))
 
-    val command = new WriteCommand[String] {}
     val request =
-      AppendEntries(node2, term = 10, logLength = 99, logTerm = 10, leaderAppliedIndex = 99, List(LogEntry(10, 100, command)))
+      AppendEntries(node2, term = 9, prevLogIndex = 99, prevLogTerm = 9, leaderCommit = 99, List(LogEntry(10, 100, command)))
 
-    node.onReceive(logState, config, request) shouldBe (node, (AppendEntriesResponse(node1, 10, 0, false), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (node, (AppendEntriesResponse(node1, 10, 99, false), List.empty))
   }
 }

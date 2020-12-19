@@ -15,7 +15,7 @@ import scala.util.Try
 
 class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStorage[F] with ErrorLogging[F] {
 
-  override def length: F[Long] =
+  override def lastIndex: F[Long] =
     errorLogging("Fetching the log length") {
       Sync[F].delay {
         val iterator = db.newIterator()
@@ -24,7 +24,7 @@ class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStora
         if (iterator.isValid) {
           val bytes    = iterator.value()
           val logEntry = ObjectSerializer.decode[LogEntry](bytes)
-          logEntry.index + 1
+          logEntry.index
         } else {
           0
         }

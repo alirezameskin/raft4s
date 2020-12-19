@@ -68,40 +68,45 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
   it should "accept AppendEntries when there is no missing log entry" in {
     val node     = FollowerNode(node1, 10)
     val logState = LogState(100, Some(10))
+    val prevLog  = Some(LogEntry(10, 100, new WriteCommand[String] {}))
 
     val expectedNode = FollowerNode(node1, 10, currentLeader = Some(node2))
     val request      = AppendEntries(node2, 10, 100, 10, 100, List(LogEntry(10, 101, new WriteCommand[String] {})))
 
-    node.onReceive(logState, config, request) shouldBe (expectedNode, (
+    node.onReceive(logState, config, request, prevLog) shouldBe (expectedNode, (
       AppendEntriesResponse(node1, 10, 101, true),
       List(AnnounceLeader(node2))
     ))
   }
 
   it should "reject AppendEntries when there is at least one missed log entry" in {
-    val node     = FollowerNode(node1, 10)
+    val node     = FollowerNode(node1, 10, currentLeader = Some(node2))
     val logState = LogState(100, Some(10))
+    val prevLog  = None
 
-    val expectedNode = FollowerNode(node1, 10)
+    val expectedNode = FollowerNode(node1, 10, currentLeader = Some(node2))
     val request      = AppendEntries(node2, 10, 105, 10, 105, List(LogEntry(10, 106, new WriteCommand[String] {})))
 
-    node.onReceive(logState, config, request) shouldBe (expectedNode, (AppendEntriesResponse(node1, 10, 100, false), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (expectedNode, (
+      AppendEntriesResponse(node1, 10, 105, false),
+      List.empty
+    ))
 
   }
 
   it should "Reject" in {
-    val node     = FollowerNode(node2, 15, Some(node1), None)
+    val node     = FollowerNode(node2, 15, currentLeader = Some(node1))
     val logState = LogState(35, Some(12), 33)
     val nullCmd  = new WriteCommand[String] {}
+    val prevLog  = Some(LogEntry(12, 33, new WriteCommand[String] {}))
 
     val request = AppendEntries(
       node1,
       15,
       33,
-      8,
+      12,
       34,
       List(
-        LogEntry(8, 33, nullCmd),
         LogEntry(12, 34, nullCmd),
         LogEntry(12, 35, nullCmd),
         LogEntry(13, 36, nullCmd),
@@ -110,13 +115,17 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
     )
 
     val expectedNode = node.copy(currentLeader = Some(node1))
-    node.onReceive(logState, config, request) shouldBe (expectedNode, (AppendEntriesResponse(node2, 15, 33, true), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (expectedNode, (
+      AppendEntriesResponse(node2, 15, 37, true),
+      List.empty
+    ))
   }
 
   it should "reject - 2" in {
     val node     = FollowerNode(node2, 25, Some(node1), Some(node1))
     val logState = LogState(45, Some(25), 43)
     val nullCmd  = new WriteCommand[String] {}
+    val prevLog  = Some(LogEntry(19, 40, new WriteCommand[String] {}))
 
     val request = AppendEntries(
       node1,
@@ -125,7 +134,6 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
       19,
       43,
       List(
-        LogEntry(21, 40, nullCmd),
         LogEntry(23, 41, nullCmd),
         LogEntry(23, 42, nullCmd),
         LogEntry(25, 43, nullCmd),
@@ -133,14 +141,15 @@ class FollowerNodeSpec extends AnyFlatSpec with should.Matchers {
       )
     )
 
-    node.onReceive(logState, config, request) shouldBe (node, (AppendEntriesResponse(node2, 25, 43, true), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (node, (AppendEntriesResponse(node2, 25, 44, true), List.empty))
   }
 
   it should "reject - 3" in {
     val node     = FollowerNode(node2, 27, Some(node1), Some(node1))
     val logState = LogState(46, Some(27), 43)
     val request  = AppendEntries(node1, 27, 45, 25, 43, List())
+    val prevLog  = Some(LogEntry(10, 100, new WriteCommand[String] {}))
 
-    node.onReceive(logState, config, request) shouldBe (node, (AppendEntriesResponse(node2, 27, 45, false), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (node, (AppendEntriesResponse(node2, 27, 45, false), List.empty))
   }
 }

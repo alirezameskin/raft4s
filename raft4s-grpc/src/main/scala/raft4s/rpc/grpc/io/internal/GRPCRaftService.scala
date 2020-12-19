@@ -16,7 +16,7 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
   override def vote(request: protos.VoteRequest): Future[protos.VoteResponse] =
     raft
       .onReceive(VoteRequest(toNode(request.nodeId), request.currentTerm, request.logLength, request.logTerm))
-      .map(res => protos.VoteResponse(res.nodeId.id, res.term, res.granted))
+      .map(res => protos.VoteResponse(res.nodeId.id, res.term, res.voteGranted))
       .handleErrorWith { error =>
         logger.warn(s"Error during the VoteRequest process. Error ${error.getMessage}") *> IO.raiseError(error)
       }

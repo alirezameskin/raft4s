@@ -15,16 +15,16 @@ case class CandidateNode(
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
     val currentTerm_ = currentTerm + 1
     val lastTerm_    = logState.lastTerm.getOrElse(lastTerm)
-    val request      = VoteRequest(node, currentTerm_, logState.length, lastTerm_)
+    val request      = VoteRequest(node, currentTerm_, logState.lastIndex, lastTerm_)
     val actions      = config.members.toList.filterNot(_ == node).map(nodeId => RequestForVote(nodeId, request))
     val quorumSize   = (config.members.size + 1) / 2
 
     if (1 >= quorumSize) {
-      val ackedLength = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
-      val sentLength  = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
-      val actions     = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
+      val matchIndex = config.members.filterNot(_ == node).map(n => (n, 0L)).toMap
+      val nextIndex  = config.members.filterNot(_ == node).map(n => (n, logState.lastIndex)).toMap
+      val actions    = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.lastIndex)).toList
 
-      (LeaderNode(node, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(node) :: actions)
+      (LeaderNode(node, currentTerm, matchIndex, nextIndex), StoreState :: AnnounceLeader(node) :: actions)
     } else {
       (
         this.copy(currentTerm = currentTerm_, lastTerm = lastTerm_, votedFor = Some(node), votedReceived = Set(node)),
@@ -40,14 +40,14 @@ case class CandidateNode(
   ): (NodeState, (VoteResponse, List[Action])) = {
 
     val myLogTerm = logState.lastTerm.getOrElse(0L)
-    val logOK     = (msg.logTerm > myLogTerm) || (msg.logTerm == myLogTerm && msg.logLength >= logState.length)
+    val logOK     = (msg.lastLogTerm > myLogTerm) || (msg.lastLogTerm == myLogTerm && msg.lastLogIndex >= logState.lastIndex)
     val termOK =
-      (msg.currentTerm > currentTerm) || (msg.currentTerm == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
+      (msg.term > currentTerm) || (msg.term == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
 
     if (logOK && termOK) {
       (
-        FollowerNode(node, msg.currentTerm, Some(msg.nodeId), None),
-        (VoteResponse(node, msg.currentTerm, true), List(StoreState))
+        FollowerNode(node, msg.term, Some(msg.nodeId), None),
+        (VoteResponse(node, msg.term, true), List(StoreState))
       )
     } else {
       (this, (VoteResponse(node, currentTerm, false), List.empty))
@@ -55,17 +55,17 @@ case class CandidateNode(
   }
 
   override def onReceive(logState: LogState, config: ClusterConfiguration, msg: VoteResponse): (NodeState, List[Action]) = {
-    val votedReceived_ = if (msg.granted) votedReceived + msg.nodeId else votedReceived
+    val votedReceived_ = if (msg.voteGranted) votedReceived + msg.nodeId else votedReceived
     val quorumSize     = (config.members.size + 1) / 2
 
     if (msg.term > currentTerm)
       (FollowerNode(node, msg.term), List(StoreState))
-    else if (msg.term == currentTerm && msg.granted && votedReceived_.size >= quorumSize) {
-      val ackedLength = config.members.filterNot(_ == node).map(n => (n, logState.length)).toMap
-      val sentLength  = config.members.filterNot(_ == node).map(n => (n, logState.appliedIndex)).toMap
-      val actions     = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.length)).toList
+    else if (msg.term == currentTerm && msg.voteGranted && votedReceived_.size >= quorumSize) {
+      val matchIndex = config.members.filterNot(_ == node).map(n => (n, 0L)).toMap
+      val nextIndex  = config.members.filterNot(_ == node).map(n => (n, logState.lastIndex + 1)).toMap
+      val actions    = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.lastIndex)).toList
 
-      (LeaderNode(node, currentTerm, ackedLength, sentLength), StoreState :: AnnounceLeader(node) :: actions)
+      (LeaderNode(node, currentTerm, matchIndex, nextIndex), StoreState :: AnnounceLeader(node) :: actions)
 
     } else
       (this.copy(votedReceived = votedReceived_), List.empty)
@@ -74,32 +74,34 @@ case class CandidateNode(
   override def onReceive(
     logState: LogState,
     config: ClusterConfiguration,
-    msg: AppendEntries
-  ): (NodeState, (AppendEntriesResponse, List[Action])) = {
+    msg: AppendEntries,
+    localPrvLogEntry: Option[LogEntry]
+  ): (NodeState, (AppendEntriesResponse, List[Action])) =
+    if (msg.term < currentTerm) {
+      (this, (AppendEntriesResponse(node, currentTerm, msg.prevLogIndex, false), List.empty))
+    } else if (msg.term > currentTerm) {
 
-    val currentTerm_ = if (msg.term > currentTerm) msg.term else currentTerm
+      val nextState = FollowerNode(node, msg.term, currentLeader = Some(msg.leaderId))
+      val actions   = List(StoreState, AnnounceLeader(msg.leaderId))
 
-    val logOK_ = msg.logLength >= logState.length
-    val logOK = if (logOK_ && msg.logLength > 0) { logState.lastTerm.contains(msg.logTerm) }
-    else logOK_
+      if (localPrvLogEntry.isEmpty)
+        (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+      else if (localPrvLogEntry.isDefined && localPrvLogEntry.get.term != msg.prevLogTerm)
+        (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+      else
+        (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex + msg.entries.length, true), actions))
+    } else {
 
-    if (msg.term == currentTerm_ && logOK)
-      (
-        FollowerNode(node, currentTerm_, None, Some(msg.leaderId)),
-        (
-          AppendEntriesResponse(node, currentTerm_, msg.logLength + msg.entries.length, true),
-          List(StoreState, AnnounceLeader(msg.leaderId))
-        )
-      )
-    else
-      (
-        this.copy(currentTerm = currentTerm_),
-        (
-          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, false),
-          if (currentTerm == currentTerm_) List.empty else List(StoreState)
-        )
-      )
-  }
+      val nextState = FollowerNode(node, msg.term, currentLeader = Some(msg.leaderId))
+      val actions   = List(StoreState, AnnounceLeader(msg.leaderId))
+
+      if (localPrvLogEntry.isEmpty)
+        (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+      else if (localPrvLogEntry.isDefined && localPrvLogEntry.get.term != msg.prevLogTerm) {
+        (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
+      } else
+        (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex + msg.entries.length, true), actions))
+    }
 
   override def onReceive(
     logState: LogState,
@@ -118,5 +120,5 @@ case class CandidateNode(
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, cluster: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(node, currentTerm, logState.appliedIndex, false))
+    (this, AppendEntriesResponse(node, currentTerm, logState.lastApplied, false))
 }

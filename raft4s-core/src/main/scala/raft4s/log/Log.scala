@@ -13,7 +13,8 @@ import raft4s.storage.{LogStorage, Snapshot, SnapshotStorage}
 import scala.collection.concurrent.TrieMap
 
 class Log[F[_]: Monad: Logger](
-  appliedIndexRef: Ref[F, Long],
+  commitIndexRef: Ref[F, Long],
+  lastAppliedRef: Ref[F, Long],
   logStorage: LogStorage[F],
   snapshotStorage: SnapshotStorage[F],
   stateMachine: StateMachine[F],
@@ -30,12 +31,12 @@ class Log[F[_]: Monad: Logger](
         _                 <- Logger[F].trace("Initializing log")
         snapshot          <- snapshotStorage.retrieveSnapshot()
         _                 <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
-        appliedIndex      <- appliedIndexRef.get
+        appliedIndex      <- lastAppliedRef.get
         _                 <- Logger[F].trace(s"Latest applied index ${appliedIndex}")
         stateMachineIndex <- stateMachine.appliedIndex
         _                 <- Logger[F].trace(s"State machine applied index ${stateMachineIndex}")
         _ <-
-          if (stateMachineIndex > appliedIndex) appliedIndexRef.set(stateMachineIndex)
+          if (stateMachineIndex > appliedIndex) lastAppliedRef.set(stateMachineIndex)
           else (stateMachineIndex + 1 to appliedIndex).toList.traverse(commit)
 
       } yield ()
@@ -52,7 +53,7 @@ class Log[F[_]: Monad: Logger](
   def installSnapshot(snapshot: Snapshot, lastEntry: LogEntry): F[Unit] =
     semaphore.withPermit {
       for {
-        length <- logStorage.length
+        length <- logStorage.lastIndex
         _ <-
           if (length >= snapshot.lastIndex)
             ME.raiseError(new RuntimeException("A new snapshot is already applied"))
@@ -65,24 +66,24 @@ class Log[F[_]: Monad: Logger](
       } yield ()
     }
 
-  def getAppendEntries(leaderId: Node, term: Long, sentLength: Long): F[AppendEntries] =
+  def getAppendEntries(leaderId: Node, term: Long, nextIndex: Long): F[AppendEntries] =
     for {
-      length       <- logStorage.length
-      appliedIndex <- appliedIndexRef.get
-      entries      <- (sentLength until length).toList.traverse(i => logStorage.get(i))
-      prevLogTerm  <- if (sentLength > 0) logStorage.get(sentLength - 1).map(_.term) else Monad[F].pure(0L)
-    } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, appliedIndex, entries)
+      lastIndex    <- logStorage.lastIndex
+      appliedIndex <- lastAppliedRef.get
+      entries      <- (nextIndex to lastIndex).toList.traverse(i => logStorage.get(i))
+      prevLogTerm  <- if (nextIndex > 0) logStorage.get(nextIndex - 1).map(_.term) else Monad[F].pure(0L)
+    } yield AppendEntries(leaderId, term, nextIndex, prevLogTerm, appliedIndex, entries)
 
   def state: F[LogState] =
     for {
-      length       <- logStorage.length
+      length       <- logStorage.lastIndex
       term         <- if (length > 0) logStorage.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
-      appliedIndex <- appliedIndexRef.get
+      appliedIndex <- lastAppliedRef.get
     } yield LogState(length, term, appliedIndex)
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
     for {
-      length <- logStorage.length
+      length <- logStorage.lastIndex
       logEntry = LogEntry(term, length, command)
       _ <- Logger[F].trace(s"Appending a command to the log. Term: ${term}, Index: ${length}")
       _ <- logStorage.put(logEntry.index, logEntry)
@@ -92,8 +93,8 @@ class Log[F[_]: Monad: Logger](
   def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Boolean] =
     semaphore.withPermit {
       for {
-        logLength    <- logStorage.length
-        appliedIndex <- appliedIndexRef.get
+        logLength    <- logStorage.lastIndex
+        appliedIndex <- lastAppliedRef.get
         _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
         _            <- putEntries(entries, logLength, leaderLogLength)
         committed    <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
@@ -112,8 +113,8 @@ class Log[F[_]: Monad: Logger](
 
     semaphore.withPermit {
       for {
-        logLength    <- logStorage.length
-        appliedIndex <- appliedIndexRef.get
+        logLength    <- logStorage.lastIndex
+        appliedIndex <- lastAppliedRef.get
         _            <- Logger[F].trace(s"Applied Index ${appliedIndex}")
         committed    <- (appliedIndex + 1 until logLength).toList.traverse(commitIfAcked)
         _            <- Logger[F].trace(s"Committed ${committed}")
@@ -161,7 +162,7 @@ class Log[F[_]: Monad: Logger](
       entry <- logStorage.get(index)
       _     <- Logger[F].trace(s"Committing the log entry at index ${index} ${entry}")
       _     <- applyCommand(index, entry.command)
-      _     <- appliedIndexRef.set(index)
+      _     <- lastAppliedRef.set(index)
     } yield ()
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
@@ -215,7 +216,17 @@ object Log {
     appliedIndex: Long
   ): F[Log[F]] =
     for {
-      lock            <- Semaphore[F](1)
-      appliedIndexRef <- Ref.of[F, Long](appliedIndex)
-    } yield new Log(appliedIndexRef, logStorage, snapshotStorage, stateMachine, membershipManager, lock, compactionPolicy)
+      lock           <- Semaphore[F](1)
+      lastAppliedRef <- Ref.of[F, Long](0L)
+      commitIndexRef <- Ref.of[F, Long](0L)
+    } yield new Log(
+      commitIndexRef,
+      lastAppliedRef,
+      logStorage,
+      snapshotStorage,
+      stateMachine,
+      membershipManager,
+      lock,
+      compactionPolicy
+    )
 }

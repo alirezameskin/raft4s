@@ -23,7 +23,7 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
   val stub = protos.RaftGrpc.stub(channel)
 
   override def send(req: VoteRequest): IO[VoteResponse] = {
-    val request = protos.VoteRequest(req.nodeId.id, req.currentTerm, req.logLength, req.logTerm)
+    val request = protos.VoteRequest(req.nodeId.id, req.term, req.lastLogIndex, req.lastLogTerm)
     val response =
       stub
         .vote(request)
@@ -41,9 +41,9 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
     val request = protos.AppendEntriesRequest(
       appendEntries.leaderId.id,
       appendEntries.term,
-      appendEntries.logLength,
-      appendEntries.logTerm,
-      appendEntries.leaderAppliedIndex,
+      appendEntries.prevLogIndex,
+      appendEntries.prevLogTerm,
+      appendEntries.leaderCommit,
       appendEntries.entries.map(entry =>
         protos.LogEntry(entry.term, entry.index, ObjectSerializer.encode[Command[_]](entry.command))
       )

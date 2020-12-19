@@ -31,7 +31,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    val expectedNode    = node.copy(ackedLength = Map(node3 -> 100), sentLength = Map(node3 -> 100))
+    val expectedNode    = node.copy(matchIndex = Map(node3 -> 100), nextIndex = Map(node3 -> 100))
     val expectedActions = List(ReplicateLog(node3, 10, 100))
     val expectedResult  = (expectedNode, (VoteResponse(node1, 10, false), expectedActions))
 
@@ -51,11 +51,15 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
   it should "not change its change when gets AppendEntries with lower Term" in {
     val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
+    val prevLog  = Some(LogEntry(10, 100, new WriteCommand[String] {}))
 
     val expectedNode = node
     val request      = AppendEntries(node2, 9, 99, 9, 99, List(LogEntry(9, 100, new WriteCommand[String] {})))
 
-    node.onReceive(logState, config, request) shouldBe (expectedNode, (AppendEntriesResponse(node1, 10, 100, false), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (expectedNode, (
+      AppendEntriesResponse(node1, 10, 99, false),
+      List.empty
+    ))
   }
 
   it should "turn to a Follower node when gets AppendEntries with higher Term" in {
@@ -64,8 +68,9 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
 
     val expectedNode = FollowerNode(node1, 11, None, Some(node2))
     val request      = AppendEntries(node2, 11, 100, 10, 100, List(LogEntry(11, 101, new WriteCommand[String] {})))
+    val prevLog      = Some(LogEntry(10, 100, new WriteCommand[String] {}))
 
-    node.onReceive(logState, config, request) shouldBe (expectedNode, (
+    node.onReceive(logState, config, request, prevLog) shouldBe (expectedNode, (
       AppendEntriesResponse(node1, 11, 101, true),
       List(StoreState, AnnounceLeader(node2, true))
     ))

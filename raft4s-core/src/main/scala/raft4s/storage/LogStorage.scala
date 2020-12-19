@@ -4,7 +4,7 @@ import raft4s.protocol.LogEntry
 
 trait LogStorage[F[_]] {
 
-  def length: F[Long]
+  def lastIndex: F[Long]
 
   def get(index: Long): F[LogEntry]
 

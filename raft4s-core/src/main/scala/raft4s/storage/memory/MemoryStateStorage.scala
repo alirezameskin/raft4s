@@ -10,7 +10,7 @@ class MemoryStateStorage[F[_]: Monad] extends StateStorage[F] {
     Monad[F].unit
 
   override def retrieveState(): F[Option[PersistedState]] =
-    Monad[F].pure(Some(PersistedState(0, None, -1L)))
+    Monad[F].pure(Some(PersistedState(0, None, 0L)))
 
 }
 

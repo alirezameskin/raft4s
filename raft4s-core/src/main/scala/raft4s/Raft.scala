@@ -92,7 +92,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     errorLogging("Receiving VoteRequest") {
       semaphore.withPermit {
         for {
-          _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
+          _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.lastLogTerm}, ${msg}")
           logState <- log.state
           ss       <- state.get
           _        <- logger.trace(s"Current state ${ss}")
@@ -103,6 +103,15 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
 
           _ <- runActions(actions)
           _ <- logger.trace(s"Vote response to the request ${response}")
+          /**
+           *          _ <- if (response.voteGranted)
+           *            for (
+           *              time <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
+           *              _ <- lastHeartbeat.set(time)
+           *          ) yield ()
+           *          else Monad[F]
+           *          }
+           */
         } yield response
       }
     }
@@ -111,7 +120,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     errorLogging("Receiving VoteResponse") {
       semaphore.withPermit {
         for {
-          _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
+          _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.voteGranted}, ${msg}")
           logState <- log.state
           config   <- membershipManager.getClusterConfiguration
           actions  <- state.modify(_.onReceive(logState, config, msg))
@@ -121,21 +130,22 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     }
 
   def onReceive(msg: AppendEntries): F[AppendEntriesResponse] =
-    errorLogging(s"Receiving an AppendEntries Term: ${msg.term} LogLength:${msg.logLength}") {
+    errorLogging(s"Receiving an AppendEntries Term: ${msg.term} LogLength:${msg.prevLogIndex}") {
       semaphore.withPermit {
         for {
           _ <- logger.trace(
             s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}"
           )
-          logState <- log.state
-          config   <- membershipManager.getClusterConfiguration
-          current  <- state.get
-          _        <- logger.trace(s"Current state ${current}")
-          _        <- logger.trace(s"Log state ${logState}")
-          time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-          _        <- lastHeartbeat.set(time)
+          logState      <- log.state
+          localPreEntry <- log.get(msg.prevLogIndex).map(Option(_))
+          config        <- membershipManager.getClusterConfiguration
+          current       <- state.get
+          _             <- logger.trace(s"Current state ${current}")
+          _             <- logger.trace(s"Log state ${logState}")
+          time          <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
+          _             <- lastHeartbeat.set(time)
 
-          (nextState, (response, actions)) = current.onReceive(logState, config, msg)
+          (nextState, (response, actions)) = current.onReceive(logState, config, msg, localPreEntry)
 
           _ <- logger.trace(s"AppendEntriesReponse ${response}")
           _ <- logger.trace(s"Actions ${actions}")
@@ -143,7 +153,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
           appended <-
             if (response.success) {
               for {
-                appended <- log.appendEntries(msg.entries, msg.logLength, msg.leaderAppliedIndex)
+                appended <- log.appendEntries(msg.entries, msg.prevLogIndex, msg.leaderCommit)
                 _        <- state.set(nextState)
               } yield appended
             } else
@@ -325,10 +335,10 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
           } yield response
         }
 
-      case ReplicateLog(peerId, term, sentLength) =>
+      case ReplicateLog(peerId, term, nextIndex) =>
         background {
           for {
-            response <- logReplicator.replicatedLogs(peerId, term, sentLength)
+            response <- logReplicator.replicatedLogs(peerId, term, nextIndex)
             _        <- this.onReceive(response)
           } yield ()
         }
@@ -358,7 +368,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       _        <- logger.trace("Storing the new state in the storage")
       logState <- log.state
       node     <- state.get
-      _        <- storage.stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.appliedIndex))
+      _        <- storage.stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.lastApplied))
     } yield ()
 
   private def runElection(): F[Unit] =
@@ -390,14 +400,14 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         .foreverM {
           for {
             _     <- Timer[F].sleep(FiniteDuration(config.heartbeatTimeoutMillis, TimeUnit.MILLISECONDS))
-            alive <- isLeaderStillAlive
+            alive <- electionTimeoutElapsed
             _     <- if (alive) Monad[F].unit else runElection()
           } yield ()
         }
         .whileM_(isRunning.get)
     }
 
-  private def isLeaderStillAlive: F[Boolean] =
+  private def electionTimeoutElapsed: F[Boolean] =
     for {
       node <- state.get
       lh   <- lastHeartbeat.get
@@ -430,7 +440,7 @@ object Raft {
     for {
       persistedState <- Resource.liftF(storage.stateStorage.retrieveState())
 
-      appliedIndex = persistedState.map(_.appliedIndex).getOrElse(-1L)
+      appliedIndex = persistedState.map(_.appliedIndex).getOrElse(0L)
       state        = FollowerNode(config.local, persistedState.map(_.term).getOrElse(0L), persistedState.flatMap(_.votedFor))
 
       clientProvider <- RpcClientProvider.resource[F](config.members)

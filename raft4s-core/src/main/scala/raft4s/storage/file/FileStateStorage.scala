@@ -31,7 +31,7 @@ class FileStateStorage[F[_]: Sync: Logger](path: Path) extends StateStorage[F] w
           lines        <- Try(Files.readAllLines(path, StandardCharsets.UTF_8).asScala)
           term         <- Try(lines.head.toLong)
           voted        <- Try(lines.tail.headOption)
-          appliedIndex <- Try(lines.tail.tail.headOption.map(_.toLong).getOrElse(-1L))
+          appliedIndex <- Try(lines.tail.tail.headOption.map(_.toLong).getOrElse(0L))
         } yield PersistedState(term, voted.flatMap(Node.fromString), appliedIndex)
 
         state.toOption

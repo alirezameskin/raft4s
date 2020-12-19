@@ -13,7 +13,8 @@ abstract class NodeState {
   def onReceive(
     state: LogState,
     config: ClusterConfiguration,
-    msg: AppendEntries
+    msg: AppendEntries,
+    localPrvLogEntry: Option[LogEntry]
   ): (NodeState, (AppendEntriesResponse, List[Action]))
 
   def onReceive(logState: LogState, config: ClusterConfiguration, msg: VoteResponse): (NodeState, List[Action])
