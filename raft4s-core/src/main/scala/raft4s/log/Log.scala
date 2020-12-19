@@ -52,9 +52,9 @@ class Log[F[_]: Monad: Logger](
   def installSnapshot(snapshot: Snapshot, lastEntry: LogEntry): F[Unit] =
     semaphore.withPermit {
       for {
-        length <- logStorage.lastIndex
+        lastIndex <- logStorage.lastIndex
         _ <-
-          if (length >= snapshot.lastIndex)
+          if (lastIndex >= snapshot.lastIndex)
             ME.raiseError(new RuntimeException("A new snapshot is already applied"))
           else Monad[F].unit
         _ <- Logger[F].trace(s"Installing a snapshot, ${snapshot}")
@@ -62,6 +62,7 @@ class Log[F[_]: Monad: Logger](
         _ <- Logger[F].trace("Restoring state from snapshot")
         _ <- restoreSnapshot(snapshot)
         _ <- logStorage.put(lastEntry.index, lastEntry)
+        _ <- commitIndexRef.set(snapshot.lastIndex)
       } yield ()
     }
 
