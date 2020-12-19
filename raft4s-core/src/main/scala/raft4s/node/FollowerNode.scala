@@ -76,14 +76,47 @@ case class FollowerNode(
           stateChangedActions ::: leaderChangeActions
         )
       )
-    } else
-      (
-        this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
+    } else {
+      if (msg.logLength == logState.appliedIndex) {
+
         (
-          AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, false),
-          if (currentTerm == currentTerm_) List.empty else List(StoreState)
+          this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
+          (
+            AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, true),
+            if (currentTerm == currentTerm_) List.empty else List(StoreState)
+          )
         )
-      )
+
+      } else if (msg.logLength < logState.appliedIndex) {
+        msg.entries.find(_.index == logState.appliedIndex) match {
+          case Some(entry) if logState.lastTerm.contains(entry.term) =>
+            (
+              this.copy(currentTerm = currentTerm_, votedFor = votedFor_, currentLeader = Some(msg.leaderId)),
+              (
+                AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, true),
+                if (currentTerm == currentTerm_) List.empty else List(StoreState)
+              )
+            )
+
+          case _ =>
+            (
+              this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
+              (
+                AppendEntriesResponse(node, currentTerm_, logState.appliedIndex, false),
+                if (currentTerm == currentTerm_) List.empty else List(StoreState)
+              )
+            )
+        }
+      } else {
+        (
+          this.copy(currentTerm = currentTerm_, votedFor = votedFor_),
+          (
+            AppendEntriesResponse(node, currentTerm_, Math.min(logState.length, msg.logLength), false),
+            if (currentTerm == currentTerm_) List.empty else List(StoreState)
+          )
+        )
+      }
+    }
   }
 
   override def onReceive(

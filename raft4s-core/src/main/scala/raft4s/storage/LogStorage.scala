@@ -10,7 +10,7 @@ trait LogStorage[F[_]] {
 
   def put(index: Long, logEntry: LogEntry): F[LogEntry]
 
-  def delete(index: Long): F[Unit]
-
   def deleteBefore(index: Long): F[Unit]
+
+  def deleteAfter(index: Long): F[Unit]
 }

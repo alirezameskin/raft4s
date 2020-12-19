@@ -22,14 +22,14 @@ class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
       logEntry
     }
 
-  override def delete(index: Long): F[Unit] =
-    Monad[F].pure {
-      map.remove(index)
-    }
-
   override def deleteBefore(index: Long): F[Unit] =
     Monad[F].pure {
       map.keysIterator.takeWhile(_ < index).foreach(map.remove)
+    }
+
+  override def deleteAfter(index: Long): F[Unit] =
+    Monad[F].pure {
+      map.keysIterator.withFilter(_ > index).foreach(map.remove)
     }
 }
 

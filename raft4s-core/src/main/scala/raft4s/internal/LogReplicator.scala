@@ -29,10 +29,6 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
         else
           log
             .getAppendEntries(leaderId, term, sentLength)
-            .map { entries =>
-              println(s"Append entries ${entries}")
-              entries
-            }
             .flatMap(request => clients.send(peerId, request))
 
     } yield response

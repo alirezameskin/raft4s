@@ -1,6 +1,6 @@
 package raft4s
 
-import cats.effect.concurrent.{Deferred, Ref}
+import cats.effect.concurrent.{Deferred, Ref, Semaphore}
 import cats.effect.{Concurrent, Resource, Sync, Timer}
 import cats.implicits._
 import cats.{Applicative, Monad, MonadError, Parallel}
@@ -24,7 +24,9 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   log: Log[F],
   storage: Storage[F],
   state: Ref[F, NodeState],
-  lastHeartbeat: Ref[F, Long]
+  semaphore: Semaphore[F],
+  lastHeartbeat: Ref[F, Long],
+  isRunning: Ref[F, Boolean]
 )(implicit ME: MonadError[F, Throwable], logger: Logger[F])
     extends ErrorLogging[F] {
 
@@ -34,6 +36,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   def start(): F[Node] =
     errorLogging("Starting Cluster") {
       for {
+        _      <- isRunning.set(true)
         _      <- logger.info("Cluster is starting")
         _      <- delayElection()
         node   <- state.get
@@ -49,6 +52,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
   def join(node: Node): F[Node] =
     errorLogging("Joining to a cluster") {
       for {
+        _      <- isRunning.set(true)
         _      <- logger.info("Cluster is joining")
         st     <- state.get
         _      <- logger.trace(s"State ${st}")
@@ -64,12 +68,18 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       } yield leader
     }
 
+  def stop: F[Unit] =
+    errorLogging("Stopping a Cluster") {
+      logger.info("Stopping the cluster") *> isRunning.set(false)
+    }
+
   def leave(): F[Unit] =
     errorLogging("Leaving a cluster") {
       for {
         _ <- logger.info(s"Node ${config.local} is leaving the cluster")
         _ <- removeMember(config.local)
         _ <- logger.info(s"Node ${config.local} left the cluster.")
+        _ <- isRunning.set(false)
       } yield ()
     }
 
@@ -80,73 +90,95 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
 
   def onReceive(msg: VoteRequest): F[VoteResponse] =
     errorLogging("Receiving VoteRequest") {
-      for {
-        _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
-        logState <- log.state
-        ss       <- state.get
-        _        <- logger.trace(s"Current state ${ss}")
-        config   <- membershipManager.getClusterConfiguration
-        result   <- state.modify(_.onReceive(logState, config, msg))
+      semaphore.withPermit {
+        for {
+          _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.logTerm}, ${msg}")
+          logState <- log.state
+          ss       <- state.get
+          _        <- logger.trace(s"Current state ${ss}")
+          config   <- membershipManager.getClusterConfiguration
+          result   <- state.modify(_.onReceive(logState, config, msg))
 
-        (response, actions) = result
+          (response, actions) = result
 
-        _ <- runActions(actions)
-        _ <- logger.trace(s"Vote response to the request ${response}")
-      } yield response
+          _ <- runActions(actions)
+          _ <- logger.trace(s"Vote response to the request ${response}")
+        } yield response
+      }
     }
 
   def onReceive(msg: VoteResponse): F[Unit] =
     errorLogging("Receiving VoteResponse") {
-      for {
-        _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
-        logState <- log.state
-        config   <- membershipManager.getClusterConfiguration
-        actions  <- state.modify(_.onReceive(logState, config, msg))
-        _        <- runActions(actions)
-      } yield ()
+      semaphore.withPermit {
+        for {
+          _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.granted}, ${msg}")
+          logState <- log.state
+          config   <- membershipManager.getClusterConfiguration
+          actions  <- state.modify(_.onReceive(logState, config, msg))
+          _        <- runActions(actions)
+        } yield ()
+      }
     }
 
   def onReceive(msg: AppendEntries): F[AppendEntriesResponse] =
-    errorLogging(s"Receiving an AppendEntries ${msg}") {
-      for {
-        _        <- logger.trace(s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}")
-        logState <- log.state
-        config   <- membershipManager.getClusterConfiguration
-        current  <- state.get
-        _        <- logger.trace(s"Current state ${current}")
-        time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-        _        <- lastHeartbeat.set(time)
+    errorLogging(s"Receiving an AppendEntries Term: ${msg.term} LogLength:${msg.logLength}") {
+      semaphore.withPermit {
+        for {
+          _ <- logger.trace(
+            s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}"
+          )
+          logState <- log.state
+          config   <- membershipManager.getClusterConfiguration
+          current  <- state.get
+          _        <- logger.trace(s"Current state ${current}")
+          _        <- logger.trace(s"Log state ${logState}")
+          time     <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
+          _        <- lastHeartbeat.set(time)
 
-        (nextState, (response, actions)) = current.onReceive(logState, config, msg)
+          (nextState, (response, actions)) = current.onReceive(logState, config, msg)
 
-        _ <- runActions(actions)
-        _ <-
-          if (response.success)
-            log.appendEntries(msg.entries, msg.logLength, msg.leaderAppliedIndex) *> state.set(nextState)
-          else
-            Monad[F].unit
-      } yield response
+          _ <- logger.trace(s"AppendEntriesReponse ${response}")
+          _ <- logger.trace(s"Actions ${actions}")
+          _ <- runActions(actions)
+          appended <-
+            if (response.success) {
+              for {
+                appended <- log.appendEntries(msg.entries, msg.logLength, msg.leaderAppliedIndex)
+                _        <- state.set(nextState)
+              } yield appended
+            } else
+              Monad[F].pure(false)
+          _ <- if (appended) storeState() else Monad[F].unit
+        } yield response
+      }
     }
 
   def onReceive(msg: AppendEntriesResponse): F[Unit] =
     errorLogging("Receiving AppendEntrriesResponse") {
-      for {
-        _        <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
-        logState <- log.state
-        config   <- membershipManager.getClusterConfiguration
-        actions  <- state.modify(_.onReceive(logState, config, msg))
-        _        <- runActions(actions)
-      } yield ()
+      semaphore.withPermit {
+        for {
+          _        <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
+          s        <- state.get
+          _        <- logger.trace(s"State ${s}")
+          logState <- log.state
+          config   <- membershipManager.getClusterConfiguration
+          actions  <- state.modify(_.onReceive(logState, config, msg))
+          _        <- logger.trace(s"Actions ${actions}")
+          _        <- runActions(actions)
+        } yield ()
+      }
     }
 
   def onReceive(msg: InstallSnapshot): F[AppendEntriesResponse] =
     errorLogging("Receiving InstallSnapshot") {
-      for {
-        _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
-        logState <- log.state
-        config   <- membershipManager.getClusterConfiguration
-        response <- state.modify(_.onSnapshotInstalled(logState, config))
-      } yield response
+      semaphore.withPermit {
+        for {
+          _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
+          logState <- log.state
+          config   <- membershipManager.getClusterConfiguration
+          response <- state.modify(_.onSnapshotInstalled(logState, config))
+        } yield response
+      }
     }
 
   def addMember(member: Node): F[Unit] =
@@ -348,19 +380,21 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
     } yield ()
 
     background {
-      Monad[F].foreverM(scheduled)
+      Monad[F].foreverM(scheduled).whileM_(isRunning.get)
     }
   }
 
   private def scheduleElection(): F[Unit] =
     background {
-      Monad[F].foreverM {
-        for {
-          _     <- Timer[F].sleep(FiniteDuration(config.heartbeatTimeoutMillis, TimeUnit.MILLISECONDS))
-          alive <- isLeaderStillAlive
-          _     <- if (alive) Monad[F].unit else runElection()
-        } yield ()
-      }
+      Monad[F]
+        .foreverM {
+          for {
+            _     <- Timer[F].sleep(FiniteDuration(config.heartbeatTimeoutMillis, TimeUnit.MILLISECONDS))
+            alive <- isLeaderStillAlive
+            _     <- if (alive) Monad[F].unit else runElection()
+          } yield ()
+        }
+        .whileM_(isRunning.get)
     }
 
   private def isLeaderStillAlive: F[Boolean] =
@@ -408,6 +442,23 @@ object Raft {
       announcer  <- Resource.liftF(LeaderAnnouncer.build[F])
       heartbeat  <- Resource.liftF(Ref.of[F, Long](0L))
       ref        <- Resource.liftF(Ref.of[F, NodeState](state))
-    } yield new Raft[F](config, membership, clientProvider, announcer, replicator, log, storage, ref, heartbeat)
+      running    <- Resource.liftF(Ref.of[F, Boolean](false))
+      semaphore  <- Resource.liftF(Semaphore[F](1))
+      raft = new Raft[F](
+        config,
+        membership,
+        clientProvider,
+        announcer,
+        replicator,
+        log,
+        storage,
+        ref,
+        semaphore,
+        heartbeat,
+        running
+      )
+      resource <- Resource.make[F, Raft[F]](Sync[F].delay(raft))(_.stop)
+
+    } yield resource
 
 }

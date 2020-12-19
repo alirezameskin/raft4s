@@ -60,6 +60,14 @@ case class LeaderNode(
           List(StoreState, AnnounceLeader(msg.leaderId, true))
         )
       )
+    else if (msg.term > currentTerm)
+      (
+        FollowerNode(node, currentTerm_, None, Some(msg.leaderId)),
+        (
+          AppendEntriesResponse(node, currentTerm_, logState.length, false),
+          List(StoreState, AnnounceLeader(msg.leaderId, true))
+        )
+      )
     else
       (this, (AppendEntriesResponse(node, currentTerm, logState.length, false), List.empty))
   }
@@ -91,7 +99,7 @@ case class LeaderNode(
     } else if (msg.currentTerm > currentTerm)
       (FollowerNode(node, msg.currentTerm), List(StoreState))
     else
-      (this, List.empty)
+      (this, List(ReplicateLog(msg.nodeId, currentTerm, sentLength.getOrElse(msg.nodeId, 0L))))
 
   override def onReplicateLog(cluster: ClusterConfiguration): List[Action] =
     cluster.members

@@ -5,7 +5,7 @@ import io.odin.Logger
 import raft4s.{Node, Raft}
 import raft4s.grpc.protos
 import raft4s.grpc.protos.{CommandRequest, CommandResponse, InstallSnapshotRequest, JoinRequest, JoinResponse}
-import raft4s.protocol.{AppendEntries, Command, InstallSnapshot, LogEntry, VoteRequest}
+import raft4s.protocol.{AppendEntries, ClusterConfiguration, Command, InstallSnapshot, LogEntry, VoteRequest}
 import raft4s.storage.Snapshot
 
 import java.nio.ByteBuffer
@@ -52,7 +52,11 @@ private[grpc] class GRPCRaftService(raft: Raft[IO])(implicit val logger: Logger[
     raft
       .onReceive(
         InstallSnapshot(
-          Snapshot(request.lastIndexId, ByteBuffer.wrap(request.bytes.toByteArray)),
+          Snapshot(
+            request.lastIndexId,
+            ByteBuffer.wrap(request.bytes.toByteArray),
+            ObjectSerializer.decode[ClusterConfiguration](request.config)
+          ),
           request.lastEntry
             .map(entry => LogEntry(entry.term, entry.index, ObjectSerializer.decode[Command[_]](entry.command)))
             .get

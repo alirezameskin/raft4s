@@ -1,6 +1,5 @@
 package raft4s.internal
 
-import cats.implicits._
 import cats.MonadError
 import io.odin.Logger
 

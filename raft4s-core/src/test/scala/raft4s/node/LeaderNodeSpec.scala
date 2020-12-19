@@ -2,99 +2,103 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
+import raft4s.Node
 import raft4s.log.LogState
 import raft4s.protocol._
 
 class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
-  val nodeId = "node1"
-  val nodes  = List("node1", "node2", "node3")
+  val node1  = Node("node1", 1080)
+  val node2  = Node("node2", 1080)
+  val node3  = Node("node3", 1080)
+  val nodes  = Set(node1, node2, node3)
+  val config = NewClusterConfiguration(nodes)
 
   "A Leader node" should "do nothing after getting an Election timer" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    node.onTimer(logState) shouldBe (node, List.empty)
+    node.onTimer(logState, config) shouldBe (node, List.empty)
   }
 
   it should "not change any state and not produce any when receives a Vote response" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    node.onReceive(logState, VoteResponse("node3", 10, true)) shouldBe (node, List.empty)
+    node.onReceive(logState, config, VoteResponse(node3, 10, true)) shouldBe (node, List.empty)
   }
 
   it should "reject votes with lower Term" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    val expectedNode    = node.copy(ackedLength = Map("node3" -> 100), sentLength = Map("node3" -> 100))
-    val expectedActions = List(ReplicateLog("node3", 10, 100))
-    val expectedResult  = (expectedNode, (VoteResponse("node1", 10, false), expectedActions))
+    val expectedNode    = node.copy(ackedLength = Map(node3 -> 100), sentLength = Map(node3 -> 100))
+    val expectedActions = List(ReplicateLog(node3, 10, 100))
+    val expectedResult  = (expectedNode, (VoteResponse(node1, 10, false), expectedActions))
 
-    node.onReceive(logState, VoteRequest("node3", 9, 100, 9)) shouldBe expectedResult
+    node.onReceive(logState, config, VoteRequest(node3, 9, 100, 9)) shouldBe expectedResult
   }
 
   it should "turn to a Follower node when it gets an Vote with higher Term" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    val expectedNode     = FollowerNode(nodeId, nodes, 12, Some("node3"))
-    val expectedResponse = (VoteResponse(nodeId, 12, true), List(StoreState))
+    val expectedNode     = FollowerNode(node1, 12, Some(node3))
+    val expectedResponse = (VoteResponse(node1, 12, true), List(StoreState, ResetLeaderAnnouncer))
 
-    node.onReceive(logState, VoteRequest("node3", 12, 100, 10)) shouldBe (expectedNode, expectedResponse)
+    node.onReceive(logState, config, VoteRequest(node3, 12, 100, 10)) shouldBe (expectedNode, expectedResponse)
   }
 
   it should "not change its change when gets AppendEntries with lower Term" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
     val expectedNode = node
-    val request      = AppendEntries("node2", 9, 99, 9, 99, List(LogEntry(9, 100, new WriteCommand[String] {})))
+    val request      = AppendEntries(node2, 9, 99, 9, 99, List(LogEntry(9, 100, new WriteCommand[String] {})))
 
-    node.onReceive(logState, request) shouldBe (expectedNode, (AppendEntriesResponse(nodeId, 10, 100, false), List.empty))
+    node.onReceive(logState, config, request) shouldBe (expectedNode, (AppendEntriesResponse(node1, 10, 100, false), List.empty))
   }
 
   it should "turn to a Follower node when gets AppendEntries with higher Term" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
-    val logState = LogState(100, Some(10))
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
+    val logState = LogState(100, Some(10), 0)
 
-    val expectedNode = FollowerNode(nodeId, nodes, 11, None, Some("node2"))
-    val request      = AppendEntries("node2", 11, 100, 10, 100, List(LogEntry(11, 101, new WriteCommand[String] {})))
+    val expectedNode = FollowerNode(node1, 11, None, Some(node2))
+    val request      = AppendEntries(node2, 11, 100, 10, 100, List(LogEntry(11, 101, new WriteCommand[String] {})))
 
-    node.onReceive(logState, request) shouldBe (expectedNode, (
-      AppendEntriesResponse(nodeId, 11, 101, true),
-      List(StoreState, AnnounceLeader("node2"))
+    node.onReceive(logState, config, request) shouldBe (expectedNode, (
+      AppendEntriesResponse(node1, 11, 101, true),
+      List(StoreState, AnnounceLeader(node2, true))
     ))
   }
 
   it should "turn to a Follower node when gets AppendEntriesResponse with higher Term" in {
 
-    val node     = LeaderNode(nodeId, nodes, 10, Map.empty, Map.empty)
+    val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    val expectedNode = FollowerNode(nodeId, nodes, 11)
-    val request      = AppendEntriesResponse("node2", 11, 1, true)
+    val expectedNode = FollowerNode(node1, 11)
+    val request      = AppendEntriesResponse(node2, 11, 1, true)
 
-    node.onReceive(logState, request) shouldBe (expectedNode, List(StoreState))
+    node.onReceive(logState, config, request) shouldBe (expectedNode, List(StoreState))
   }
 
   it should "commit logs when it gets a success response for AppendEntries" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map("node2" -> 100, "node3" -> 100), Map("node2" -> 0, "node3" -> 0))
+    val node     = LeaderNode(node1, 10, Map(node2 -> 100, node3 -> 100), Map(node2 -> 0, node3 -> 0))
     val logState = LogState(101, Some(10))
 
-    val expectedNode    = LeaderNode(nodeId, nodes, 10, Map("node2" -> 101, "node3" -> 100), Map("node2" -> 101, "node3" -> 0))
-    val expectedActions = List(CommitLogs(Map("node2" -> 101, "node3" -> 100, "node1" -> 101), minAckes = 2))
+    val expectedNode    = LeaderNode(node1, 10, Map(node2 -> 101, node3 -> 100), Map(node2 -> 101, node3 -> 0))
+    val expectedActions = List(CommitLogs(Map(node2 -> 101, node3 -> 100, node1 -> 101)))
 
-    node.onReceive(logState, AppendEntriesResponse("node2", 10, 101, true)) shouldBe (expectedNode, expectedActions)
+    node.onReceive(logState, config, AppendEntriesResponse(node2, 10, 101, true)) shouldBe (expectedNode, expectedActions)
   }
 
   it should "replicate logs when it gets a unsuccessful response for AppendEntries" in {
-    val node     = LeaderNode(nodeId, nodes, 10, Map("node2" -> 100, "node3" -> 100), Map("node2" -> 100, "node3" -> 100))
+    val node     = LeaderNode(node1, 10, Map(node2 -> 100, node3 -> 100), Map(node2 -> 100, node3 -> 100))
     val logState = LogState(101, Some(10))
 
-    val expectedNode    = LeaderNode(nodeId, nodes, 10, Map("node2" -> 100, "node3" -> 100), Map("node2" -> 99, "node3" -> 100))
-    val expectedActions = List(ReplicateLog("node2", 10, 99))
+    val expectedNode    = LeaderNode(node1, 10, Map(node2 -> 100, node3 -> 100), Map(node2 -> 99, node3 -> 100))
+    val expectedActions = List(ReplicateLog(node2, 10, 99))
 
-    node.onReceive(logState, AppendEntriesResponse("node2", 10, 101, false)) shouldBe (expectedNode, expectedActions)
+    node.onReceive(logState, config, AppendEntriesResponse(node2, 10, 101, false)) shouldBe (expectedNode, expectedActions)
   }
 }

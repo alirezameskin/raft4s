@@ -79,7 +79,8 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
       protos.InstallSnapshotRequest(
         snapshot.lastIndex,
         Some(protos.LogEntry(lastEntry.term, lastEntry.index, ObjectSerializer.encode[Command[_]](lastEntry.command))),
-        protobuf.ByteString.copyFrom(snapshot.bytes.array())
+        protobuf.ByteString.copyFrom(snapshot.bytes.array()),
+        ObjectSerializer.encode[ClusterConfiguration](snapshot.config)
       )
     val response = stub
       .installSnapshot(request)
