@@ -20,15 +20,19 @@ private[raft4s] class LogReplicator[F[_]: Concurrent: Logger](
 
   def replicatedLogs(peerId: Node, term: Long, nextIndex: Long): F[AppendEntriesResponse] =
     for {
-      _        <- Logger[F].trace(s"Replicating logs to ${peerId}. Term: ${term}, sentLength : ${nextIndex}")
+      _        <- Logger[F].trace(s"Replicating logs to ${peerId}. Term: ${term}, nextIndex: ${nextIndex}")
       _        <- snapshotIsNotInstalling(peerId)
       snapshot <- log.latestSnapshot
       response <-
-        if (snapshot.exists(_.lastIndex > nextIndex))
+        if (snapshot.exists(_.lastIndex >= nextIndex))
           sendSnapshot(peerId, snapshot.get)
         else
           log
             .getAppendEntries(leaderId, term, nextIndex)
+            .map { req =>
+              println(req)
+              req
+            }
             .flatMap(request => clients.send(peerId, request))
 
     } yield response

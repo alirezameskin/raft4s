@@ -103,15 +103,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
 
           _ <- runActions(actions)
           _ <- logger.trace(s"Vote response to the request ${response}")
-          /**
-           *          _ <- if (response.voteGranted)
-           *            for (
-           *              time <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-           *              _ <- lastHeartbeat.set(time)
-           *          ) yield ()
-           *          else Monad[F]
-           *          }
-           */
+          _ <- if (response.voteGranted) updateLastHeartbeat else Monad[F].unit
         } yield response
       }
     }
@@ -142,8 +134,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
           current       <- state.get
           _             <- logger.trace(s"Current state ${current}")
           _             <- logger.trace(s"Log state ${logState}")
-          time          <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-          _             <- lastHeartbeat.set(time)
+          _             <- updateLastHeartbeat
 
           (nextState, (response, actions)) = current.onReceive(logState, config, msg, localPreEntry)
 
@@ -301,7 +292,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
             _         <- logger.trace(s"Appending the command to the log -  ${cluster.members}")
             entry     <- log.append(term, command, deferred)
             _         <- logger.trace(s"Entry appended ${entry}")
-            committed <- log.commitLogs(Map(config.local -> (entry.index + 1)))
+            committed <- log.commitLogs(Map(config.local -> (entry.index)))
             _         <- if (committed) storeState() else Monad[F].unit
           } yield List.empty
         else
@@ -337,10 +328,12 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
 
       case ReplicateLog(peerId, term, nextIndex) =>
         background {
-          for {
-            response <- logReplicator.replicatedLogs(peerId, term, nextIndex)
-            _        <- this.onReceive(response)
-          } yield ()
+          errorLogging(s"Replicating logs to ${peerId}, Term: ${term}, NextIndex: ${nextIndex}") {
+            for {
+              response <- logReplicator.replicatedLogs(peerId, term, nextIndex)
+              _        <- this.onReceive(response)
+            } yield ()
+          }
         }
 
       case StoreState =>
@@ -356,7 +349,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         leaderAnnouncer.reset() *> leaderAnnouncer.announce(leaderId)
 
       case AnnounceLeader(leaderId, false) =>
-        logger.trace("Anouncing a new leader without resetting ") *> leaderAnnouncer.announce(leaderId)
+        logger.trace("Announcing a new leader without resetting ") *> leaderAnnouncer.announce(leaderId)
 
       case ResetLeaderAnnouncer =>
         leaderAnnouncer.reset()
@@ -368,7 +361,7 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
       _        <- logger.trace("Storing the new state in the storage")
       logState <- log.state
       node     <- state.get
-      _        <- storage.stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.lastApplied))
+      _        <- storage.stateStorage.persistState(node.toPersistedState.copy(appliedIndex = logState.lastAppliedIndex))
     } yield ()
 
   private def runElection(): F[Unit] =
@@ -406,6 +399,13 @@ class Raft[F[_]: Monad: Concurrent: Timer: Parallel](
         }
         .whileM_(isRunning.get)
     }
+
+  private def updateLastHeartbeat: F[Unit] =
+    for {
+      _    <- logger.trace(s"Update Last heartbeat time")
+      time <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
+      _    <- lastHeartbeat.set(time)
+    } yield ()
 
   private def electionTimeoutElapsed: F[Boolean] =
     for {

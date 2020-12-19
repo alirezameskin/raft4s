@@ -12,7 +12,7 @@ case class FollowerNode(
 ) extends NodeState {
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
-    val (state, actions) = CandidateNode(node, currentTerm, logState.lastTerm.getOrElse(0L)).onTimer(logState, config)
+    val (state, actions) = CandidateNode(node, currentTerm, logState.lastLogTerm.getOrElse(0L)).onTimer(logState, config)
 
     if (state.isInstanceOf[LeaderNode])
       (state, actions)
@@ -30,15 +30,15 @@ case class FollowerNode(
     if (msg.term < currentTerm) {
       (this, (VoteResponse(node, msg.term, false)))
     } else if (votedFor.isEmpty || votedFor.contains(msg.nodeId)) {
-      if (msg.lastLogIndex >= logState.lastIndex && msg.lastLogTerm >= logState.lastTerm.getOrElse(0L)) {
+      if (msg.lastLogIndex >= logState.lastLogIndex && msg.lastLogTerm >= logState.lastLogTerm.getOrElse(0L)) {
         (VoteResponse(node, msg.term, true), List(StoreState))
       } else {
         (this, (VoteResponse(node, msg.term, false)))
       }
     }
 
-    val myLogTerm = logState.lastTerm.getOrElse(0L)
-    val logOK     = (msg.lastLogTerm > myLogTerm) || (msg.lastLogTerm == myLogTerm && msg.lastLogIndex >= logState.lastIndex)
+    val myLogTerm = logState.lastLogTerm.getOrElse(0L)
+    val logOK     = (msg.lastLogTerm > myLogTerm) || (msg.lastLogTerm == myLogTerm && msg.lastLogIndex >= logState.lastLogIndex)
     val termOK =
       (msg.term > currentTerm) || (msg.term == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
 
@@ -73,7 +73,7 @@ case class FollowerNode(
           else
             List(StoreState, AnnounceLeader(msg.leaderId, true))
 
-        if (localPrevLogEntry.isEmpty)
+        if (msg.prevLogIndex > 0 && localPrevLogEntry.isEmpty)
           (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
         else if (localPrevLogEntry.isDefined && localPrevLogEntry.get.term != msg.prevLogTerm)
           (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
@@ -90,7 +90,7 @@ case class FollowerNode(
           else
             (this.copy(currentLeader = Some(msg.leaderId)), List(AnnounceLeader(msg.leaderId, true)))
 
-        if (localPrevLogEntry.isEmpty)
+        if (msg.prevLogIndex > 0 && localPrevLogEntry.isEmpty)
           (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
         else if (localPrevLogEntry.isDefined && localPrevLogEntry.get.term != msg.prevLogTerm) {
           (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
@@ -116,5 +116,5 @@ case class FollowerNode(
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, config: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(node, currentTerm, logState.lastIndex - 1, true))
+    (this, AppendEntriesResponse(node, currentTerm, logState.lastLogIndex - 1, true))
 }

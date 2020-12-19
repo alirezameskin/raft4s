@@ -19,8 +19,8 @@ case class LeaderNode(
     config: ClusterConfiguration,
     msg: VoteRequest
   ): (NodeState, (VoteResponse, List[Action])) = {
-    val lastTerm = logState.lastTerm.getOrElse(currentTerm)
-    val logOK    = (msg.lastLogTerm > lastTerm) || (msg.lastLogTerm == lastTerm && msg.lastLogIndex >= logState.lastIndex)
+    val lastTerm = logState.lastLogTerm.getOrElse(currentTerm)
+    val logOK    = (msg.lastLogTerm > lastTerm) || (msg.lastLogTerm == lastTerm && msg.lastLogIndex >= logState.lastLogIndex)
     val termOK   = msg.term > currentTerm
 
     if (logOK && termOK)
@@ -30,12 +30,12 @@ case class LeaderNode(
       )
     else {
 
-      val sentLength_  = nextIndex + (msg.nodeId  -> msg.lastLogIndex)
-      val ackedLength_ = matchIndex + (msg.nodeId -> msg.lastLogIndex)
+      val nextIndex_  = nextIndex + (msg.nodeId  -> (msg.lastLogIndex + 1))
+      val matchIndex_ = matchIndex + (msg.nodeId -> msg.lastLogIndex)
 
       (
-        this.copy(nextIndex = sentLength_, matchIndex = ackedLength_),
-        (VoteResponse(node, currentTerm, false), List(ReplicateLog(msg.nodeId, currentTerm, msg.lastLogIndex)))
+        this.copy(nextIndex = nextIndex_, matchIndex = matchIndex_),
+        (VoteResponse(node, currentTerm, false), List(ReplicateLog(msg.nodeId, currentTerm, msg.lastLogIndex + 1)))
       )
     }
   }
@@ -56,7 +56,7 @@ case class LeaderNode(
       val nextState = FollowerNode(node, msg.term, currentLeader = Some(msg.leaderId))
       val actions   = List(StoreState, AnnounceLeader(msg.leaderId, true))
 
-      if (localPrvLogEntry.isEmpty)
+      if (msg.prevLogIndex > 0 && localPrvLogEntry.isEmpty)
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
       else if (localPrvLogEntry.isDefined && localPrvLogEntry.get.term != msg.prevLogTerm)
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
@@ -67,7 +67,7 @@ case class LeaderNode(
       val nextState = FollowerNode(node, msg.term, currentLeader = Some(msg.leaderId))
       val actions   = List(StoreState, AnnounceLeader(msg.leaderId, true))
 
-      if (localPrvLogEntry.isEmpty)
+      if (msg.prevLogTerm > 0 && localPrvLogEntry.isEmpty)
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
       else if (localPrvLogEntry.isDefined && localPrvLogEntry.get.term != msg.prevLogTerm) {
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
@@ -79,52 +79,40 @@ case class LeaderNode(
     logState: LogState,
     cluster: ClusterConfiguration,
     msg: AppendEntriesResponse
-  ): (NodeState, List[Action]) = {
+  ): (NodeState, List[Action]) =
     if (msg.currentTerm > currentTerm) {
-      (this, List.empty) //Convert to Follower
+      (FollowerNode(node, msg.currentTerm, None, None), List(StoreState, ResetLeaderAnnouncer)) //Convert to Follower
     } else {
       if (msg.success) {
-        val nextIndex_  = nextIndex + (msg.nodeId  -> msg.ack)
+        val nextIndex_  = nextIndex + (msg.nodeId  -> (msg.ack + 1L))
         val matchIndex_ = matchIndex + (msg.nodeId -> msg.ack)
 
         //If successful: update nextIndex and matchIndex forfollower (§5.3)
-      } else {
-        val nextIndex_ = nextIndex + (msg.nodeId -> (nextIndex.getOrElse(msg.nodeId, 0L) - 1))
-
-        //If AppendEntries fails because of log inconsistency:decrement nextIndex and retry
-      }
-
-    }
-
-    if (msg.currentTerm == currentTerm) {
-
-      if (msg.success && msg.ack >= matchIndex.getOrElse(msg.nodeId, 0L)) {
-        val sentLength_  = nextIndex + (msg.nodeId  -> msg.ack)
-        val ackedLength_ = matchIndex + (msg.nodeId -> msg.ack)
-
         (
-          this.copy(matchIndex = ackedLength_, nextIndex = sentLength_),
-          List(CommitLogs(ackedLength_ + (node -> logState.lastIndex)))
+          this.copy(matchIndex = matchIndex_, nextIndex = nextIndex_),
+          List(CommitLogs(matchIndex_ + (node -> logState.lastLogIndex)))
         )
 
-      } else if (nextIndex.getOrElse(msg.nodeId, 0L) > 0) {
-        val sentLength_ = nextIndex + (msg.nodeId -> (nextIndex.getOrElse(msg.nodeId, 0L) - 1))
-        val actions     = List(ReplicateLog(msg.nodeId, currentTerm, sentLength_(msg.nodeId)))
+      } else {
+        //If AppendEntries fails because of log inconsistency:decrement nextIndex and retry
 
-        (this.copy(nextIndex = sentLength_), actions)
-      } else
-        (this, List.empty)
+        val nodeNextIndex = nextIndex.get(msg.nodeId) match {
+          case Some(next) if next == 1 => 1
+          case Some(next)              => next - 1
+          case None                    => 1
+        }
 
-    } else if (msg.currentTerm > currentTerm)
-      (FollowerNode(node, msg.currentTerm), List(StoreState))
-    else
-      (this, List(ReplicateLog(msg.nodeId, currentTerm, nextIndex.getOrElse(msg.nodeId, 0L))))
-  }
+        val nextIndex_ = nextIndex + (msg.nodeId -> nodeNextIndex)
+        val actions    = List(ReplicateLog(msg.nodeId, currentTerm, nextIndex_(msg.nodeId)))
+
+        (this.copy(nextIndex = nextIndex_), actions)
+      }
+    }
 
   override def onReplicateLog(cluster: ClusterConfiguration): List[Action] =
     cluster.members
       .filterNot(_ == node)
-      .map(peer => ReplicateLog(peer, currentTerm, nextIndex.getOrElse(peer, 0L)))
+      .map(peer => ReplicateLog(peer, currentTerm, nextIndex.getOrElse(peer, 1L)))
       .toList
 
   override def leader: Option[Node] =
@@ -134,6 +122,6 @@ case class LeaderNode(
     PersistedState(currentTerm, Some(node))
 
   override def onSnapshotInstalled(logState: LogState, cluster: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(node, currentTerm, logState.lastIndex - 1, false))
+    (this, AppendEntriesResponse(node, currentTerm, logState.lastLogIndex - 1, false))
 
 }

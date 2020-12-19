@@ -84,7 +84,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val expectedNode = FollowerNode(node1, 11)
     val request      = AppendEntriesResponse(node2, 11, 1, true)
 
-    node.onReceive(logState, config, request) shouldBe (expectedNode, List(StoreState))
+    node.onReceive(logState, config, request) shouldBe (expectedNode, List(StoreState, ResetLeaderAnnouncer))
   }
 
   it should "commit logs when it gets a success response for AppendEntries" in {

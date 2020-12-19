@@ -14,15 +14,15 @@ case class CandidateNode(
 
   override def onTimer(logState: LogState, config: ClusterConfiguration): (NodeState, List[Action]) = {
     val currentTerm_ = currentTerm + 1
-    val lastTerm_    = logState.lastTerm.getOrElse(lastTerm)
-    val request      = VoteRequest(node, currentTerm_, logState.lastIndex, lastTerm_)
+    val lastTerm_    = logState.lastLogTerm.getOrElse(lastTerm)
+    val request      = VoteRequest(node, currentTerm_, logState.lastLogIndex, lastTerm_)
     val actions      = config.members.toList.filterNot(_ == node).map(nodeId => RequestForVote(nodeId, request))
     val quorumSize   = (config.members.size + 1) / 2
 
     if (1 >= quorumSize) {
       val matchIndex = config.members.filterNot(_ == node).map(n => (n, 0L)).toMap
-      val nextIndex  = config.members.filterNot(_ == node).map(n => (n, logState.lastIndex)).toMap
-      val actions    = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.lastIndex)).toList
+      val nextIndex  = config.members.filterNot(_ == node).map(n => (n, logState.lastLogIndex + 1)).toMap
+      val actions    = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.lastLogIndex + 1)).toList
 
       (LeaderNode(node, currentTerm, matchIndex, nextIndex), StoreState :: AnnounceLeader(node) :: actions)
     } else {
@@ -39,8 +39,8 @@ case class CandidateNode(
     msg: VoteRequest
   ): (NodeState, (VoteResponse, List[Action])) = {
 
-    val myLogTerm = logState.lastTerm.getOrElse(0L)
-    val logOK     = (msg.lastLogTerm > myLogTerm) || (msg.lastLogTerm == myLogTerm && msg.lastLogIndex >= logState.lastIndex)
+    val myLogTerm = logState.lastLogTerm.getOrElse(0L)
+    val logOK     = (msg.lastLogTerm > myLogTerm) || (msg.lastLogTerm == myLogTerm && msg.lastLogIndex >= logState.lastLogIndex)
     val termOK =
       (msg.term > currentTerm) || (msg.term == currentTerm && (votedFor.isEmpty || votedFor.contains(msg.nodeId)))
 
@@ -62,8 +62,8 @@ case class CandidateNode(
       (FollowerNode(node, msg.term), List(StoreState))
     else if (msg.term == currentTerm && msg.voteGranted && votedReceived_.size >= quorumSize) {
       val matchIndex = config.members.filterNot(_ == node).map(n => (n, 0L)).toMap
-      val nextIndex  = config.members.filterNot(_ == node).map(n => (n, logState.lastIndex + 1)).toMap
-      val actions    = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.lastIndex)).toList
+      val nextIndex  = config.members.filterNot(_ == node).map(n => (n, logState.lastLogIndex + 1)).toMap
+      val actions    = config.members.filterNot(_ == node).map(n => ReplicateLog(n, currentTerm, logState.lastLogIndex + 1)).toList
 
       (LeaderNode(node, currentTerm, matchIndex, nextIndex), StoreState :: AnnounceLeader(node) :: actions)
 
@@ -84,7 +84,7 @@ case class CandidateNode(
       val nextState = FollowerNode(node, msg.term, currentLeader = Some(msg.leaderId))
       val actions   = List(StoreState, AnnounceLeader(msg.leaderId))
 
-      if (localPrvLogEntry.isEmpty)
+      if (msg.prevLogIndex > 0 && localPrvLogEntry.isEmpty)
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
       else if (localPrvLogEntry.isDefined && localPrvLogEntry.get.term != msg.prevLogTerm)
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
@@ -95,7 +95,7 @@ case class CandidateNode(
       val nextState = FollowerNode(node, msg.term, currentLeader = Some(msg.leaderId))
       val actions   = List(StoreState, AnnounceLeader(msg.leaderId))
 
-      if (localPrvLogEntry.isEmpty)
+      if (msg.prevLogIndex > 0 && localPrvLogEntry.isEmpty)
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
       else if (localPrvLogEntry.isDefined && localPrvLogEntry.get.term != msg.prevLogTerm) {
         (nextState, (AppendEntriesResponse(node, msg.term, msg.prevLogIndex, false), actions))
@@ -120,5 +120,5 @@ case class CandidateNode(
     PersistedState(currentTerm, votedFor)
 
   override def onSnapshotInstalled(logState: LogState, cluster: ClusterConfiguration): (NodeState, AppendEntriesResponse) =
-    (this, AppendEntriesResponse(node, currentTerm, logState.lastApplied, false))
+    (this, AppendEntriesResponse(node, currentTerm, logState.lastAppliedIndex, false))
 }

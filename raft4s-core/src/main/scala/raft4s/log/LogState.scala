@@ -1,3 +1,3 @@
 package raft4s.log
 
-case class LogState(lastIndex: Long, lastTerm: Option[Long], lastApplied: Long = 0)
+case class LogState(lastLogIndex: Long, lastLogTerm: Option[Long], lastAppliedIndex: Long = 0)
