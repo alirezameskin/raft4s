@@ -10,7 +10,7 @@ class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
 
   private val map = mutable.TreeMap.empty[Long, LogEntry]
 
-  override def length: F[Long] =
+  override def lastIndex: F[Long] =
     Monad[F].pure(map.size)
 
   override def get(index: Long): F[LogEntry] =
@@ -22,14 +22,14 @@ class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
       logEntry
     }
 
-  override def delete(index: Long): F[Unit] =
-    Monad[F].pure {
-      map.remove(index)
-    }
-
   override def deleteBefore(index: Long): F[Unit] =
     Monad[F].pure {
       map.keysIterator.takeWhile(_ < index).foreach(map.remove)
+    }
+
+  override def deleteAfter(index: Long): F[Unit] =
+    Monad[F].pure {
+      map.keysIterator.withFilter(_ > index).foreach(map.remove)
     }
 }
 

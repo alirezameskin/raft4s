@@ -1,3 +1,5 @@
 package raft4s.protocol
 
-case class AppendEntriesResponse(nodeId: String, currentTerm: Long, ack: Long, success: Boolean)
+import raft4s.Node
+
+case class AppendEntriesResponse(nodeId: Node, currentTerm: Long, ack: Long, success: Boolean)

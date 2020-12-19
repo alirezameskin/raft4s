@@ -1,7 +1,8 @@
 package raft4s
 
 import raft4s.protocol.{ReadCommand, WriteCommand}
-import raft4s.storage.Snapshot
+
+import java.nio.ByteBuffer
 
 trait StateMachine[F[_]] {
   def applyWrite: PartialFunction[(Long, WriteCommand[_]), F[Any]]
@@ -10,7 +11,7 @@ trait StateMachine[F[_]] {
 
   def appliedIndex: F[Long]
 
-  def takeSnapshot(): F[Snapshot]
+  def takeSnapshot(): F[(Long, ByteBuffer)]
 
-  def restoreSnapshot(snapshot: Snapshot): F[Unit]
+  def restoreSnapshot(index: Long, bytes: ByteBuffer): F[Unit]
 }

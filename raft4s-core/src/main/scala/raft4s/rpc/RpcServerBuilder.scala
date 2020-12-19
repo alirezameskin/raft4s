@@ -1,10 +1,10 @@
 package raft4s.rpc
 
 import cats.effect.Resource
-import raft4s.{Address, Raft}
+import raft4s.{Node, Raft}
 
 trait RpcServerBuilder[F[_]] {
-  def resource(address: Address, raft: Raft[F]): Resource[F, RpcServer[F]]
+  def resource(node: Node, raft: Raft[F]): Resource[F, RpcServer[F]]
 }
 
 object RpcServerBuilder {

@@ -7,12 +7,14 @@ service Raft {
   rpc appendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
   rpc execute(CommandRequest) returns (CommandResponse) {}
   rpc installSnapshot(InstallSnapshotRequest) returns (AppendEntriesResponse) {}
+  rpc join(JoinRequest) returns (JoinResponse) {}
 }
 
 message InstallSnapshotRequest {
   uint64 lastIndexId = 1;
   LogEntry lastEntry = 2;
   bytes bytes = 3;
+  bytes config = 4;
 }
 
 message CommandRequest {
@@ -20,7 +22,7 @@ message CommandRequest {
 }
 
 message CommandResponse {
-  bytes outpue = 1;
+  bytes output = 1;
 }
 
 message VoteRequest {
@@ -56,5 +58,19 @@ message AppendEntriesResponse {
   uint64 currentTerm = 2;
   uint64 ack = 3;
   bool success = 4;
+}
+
+
+message JoinRequest {
+  string host = 1;
+  int32 port = 2;
+}
+
+message JoinResponse {
+}
+
+message NodeInfo {
+  string host = 1;
+  int32 port = 2;
 }
 

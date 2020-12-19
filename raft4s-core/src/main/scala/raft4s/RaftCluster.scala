@@ -11,14 +11,24 @@ import raft4s.storage.Storage
 
 class RaftCluster[F[_]: Monad](rpc: RpcServer[F], raft: Raft[F]) {
 
-  def start: F[String] =
+  def start: F[Node] =
     for {
       _      <- raft.initialize()
       _      <- rpc.start()
       leader <- raft.start()
     } yield leader
 
-  def leader: F[String] =
+  def join(node: Node): F[Node] =
+    for {
+      _      <- raft.initialize()
+      _      <- rpc.start()
+      leader <- raft.join(node)
+    } yield leader
+
+  def leave(): F[Unit] =
+    raft.leave()
+
+  def leader: F[Node] =
     raft.listen()
 
   def execute[T](command: Command[T]): F[T] =

@@ -1,10 +1,12 @@
 package raft4s.protocol
 
+import raft4s.Node
+
 case class AppendEntries(
-  leaderId: String,
+  leaderId: Node,
   term: Long,
-  logLength: Long,
-  logTerm: Long,
-  leaderAppliedIndex: Long,
+  prevLogIndex: Long,
+  prevLogTerm: Long,
+  leaderCommit: Long,
   entries: List[LogEntry]
 )

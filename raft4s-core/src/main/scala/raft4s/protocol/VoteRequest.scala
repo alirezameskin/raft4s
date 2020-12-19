@@ -1,3 +1,5 @@
 package raft4s.protocol
 
-case class VoteRequest(nodeId: String, currentTerm: Long, logLength: Long, logTerm: Long)
+import raft4s.Node
+
+case class VoteRequest(nodeId: Node, term: Long, lastLogIndex: Long, lastLogTerm: Long)

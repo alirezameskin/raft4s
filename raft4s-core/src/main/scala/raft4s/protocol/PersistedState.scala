@@ -1,3 +1,5 @@
 package raft4s.protocol
 
-private[raft4s] case class PersistedState(term: Long, votedFor: Option[String])
+import raft4s.Node
+
+private[raft4s] case class PersistedState(term: Long, votedFor: Option[Node], appliedIndex: Long = 0L)

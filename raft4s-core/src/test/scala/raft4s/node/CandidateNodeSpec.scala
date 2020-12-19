@@ -2,133 +2,145 @@ package raft4s.node
 
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
+import raft4s.Node
 import raft4s.log.LogState
 import raft4s.protocol._
 
 class CandidateNodeSpec extends AnyFlatSpec with should.Matchers {
-  val nodeId = "node1"
-  val nodes  = List("node1", "node2", "node3")
+  val node1  = Node("node1", 1080)
+  val node2  = Node("node2", 1080)
+  val node3  = Node("node3", 1080)
+  val nodes  = Set(node1, node2, node3)
+  val config = NewClusterConfiguration(nodes)
 
   "A Candidate node" should "return an empty list of actions for onReplicateLog request" in {
-    val node = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
 
-    node.onReplicateLog() shouldBe List.empty
+    node.onReplicateLog(config) shouldBe List.empty
   }
 
   it should "return an empty list of actions after getting AppendEntriesResponse without changing the node state" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
 
-    node.onReceive(logState, AppendEntriesResponse("node2", 10, 1, true)) shouldBe (node, List.empty)
+    node.onReceive(logState, config, AppendEntriesResponse(node2, 10, 1, true)) shouldBe (node, List.empty)
   }
 
   it should "stay in Candidate state and increase the term and send vote requests on election timer" in {
-    val node = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
 
-    val voteRequest     = VoteRequest("node1", 11, 100, 10)
-    val voteRequests    = List(RequestForVote("node2", voteRequest), RequestForVote("node3", voteRequest))
-    val expectedState   = CandidateNode(nodeId, nodes, 11, 10, Some("node1"), Set("node1"))
+    val voteRequest     = VoteRequest(node1, 11, 100, 10)
+    val voteRequests    = List(RequestForVote(node2, voteRequest), RequestForVote(node3, voteRequest))
+    val expectedState   = CandidateNode(node1, 11, 10, Some(node1), Set(node1))
     val expectedActions = StoreState :: voteRequests
 
     val logState = LogState(100, Some(10))
 
-    node.onTimer(logState) shouldBe (expectedState, expectedActions)
+    node.onTimer(logState, config) shouldBe (expectedState, expectedActions)
   }
 
   it should "turn to a FollowerNode after discovering a higher Term, and accept the received VoteRequest" in {
 
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
 
-    val expectedState = FollowerNode("node1", nodes, 11, Some("node2"), None)
+    val expectedState = FollowerNode(node1, 11, Some(node2), None)
 
-    node.onReceive(logState, VoteRequest("node2", 11, 100, 10)) shouldBe (expectedState, (
-      VoteResponse("node1", 11, true),
+    node.onReceive(logState, config, VoteRequest(node2, 11, 100, 10)) shouldBe (expectedState, (
+      VoteResponse(node1, 11, true),
       List(StoreState)
     ))
   }
 
   it should "reject any VoteRequest with lower Term and not change its state" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
 
-    node.onReceive(logState, VoteRequest("node2", 9, 100, 9)) shouldBe (node, (VoteResponse("node1", 10, false), List.empty))
+    node.onReceive(logState, config, VoteRequest(node2, 9, 100, 9)) shouldBe (node, (VoteResponse(node1, 10, false), List.empty))
   }
 
   it should "reject any VoteRequest with lower log length and not change its state" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
 
-    node.onReceive(logState, VoteRequest("node2", 10, 99, 10)) shouldBe (node, (VoteResponse("node1", 10, false), List.empty))
+    node.onReceive(logState, config, VoteRequest(node2, 10, 99, 10)) shouldBe (node, (VoteResponse(node1, 10, false), List.empty))
   }
 
   it should "turn to a Follower node and cancel Election timer when receiving a VoteResponse with higher Term" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
 
-    val expectedState = FollowerNode(nodeId, nodes, 11, None, None)
-    node.onReceive(logState, VoteResponse("node2", 11, false)) shouldBe (expectedState, List(StoreState))
+    val expectedState = FollowerNode(node1, 11, None, None)
+    node.onReceive(logState, config, VoteResponse(node2, 11, false)) shouldBe (expectedState, List(StoreState))
   }
 
   it should "stay in the candidate state and adder the voter id in the Voted list" in {
-    val node     = CandidateNode(nodeId, List("node1", "node2", "node3", "node4", "node5"), 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
+    val config   = NewClusterConfiguration(Set(node1, node2, node3, Node("node4", 1080), Node("node5", 1080)))
 
-    val expectedState = node.copy(votedReceived = Set("node1", "node2"))
+    val expectedState = node.copy(votedReceived = Set(node1, node2))
 
-    node.onReceive(logState, VoteResponse("node2", 10, true)) shouldBe (expectedState, List.empty)
+    node.onReceive(logState, config, VoteResponse(node2, 10, true)) shouldBe (expectedState, List.empty)
   }
 
   it should "not consider duplicate vote response" in {
-    val node     = CandidateNode(nodeId, List("node1", "node2", "node3", "node4", "node5"), 10, 10, Some("node1"), Set("node1"))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
+    val config   = NewClusterConfiguration(Set(node1, node2, node3, Node("node4", 1080), Node("node5", 1080)))
 
-    val expectedState = node.copy(votedReceived = Set("node1", "node2"))
+    val expectedState = node.copy(votedReceived = Set(node1, node2))
 
-    node.onReceive(logState, VoteResponse("node2", 10, true)) shouldBe (expectedState, List.empty)
-    expectedState.onReceive(logState, VoteResponse("node2", 10, true)) shouldBe (expectedState, List.empty)
+    node.onReceive(logState, config, VoteResponse(node2, 10, true)) shouldBe (expectedState, List.empty)
+    expectedState.onReceive(logState, config, VoteResponse(node2, 10, true)) shouldBe (expectedState, List.empty)
   }
 
   it should "turn to a Leader and start log replication after receiving a quorum of granted VoteResponse" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
-    val logState = LogState(100, Some(10))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
+    val logState = LogState(100, Some(10), 0)
 
     val expectedState = LeaderNode(
-      nodeId,
-      nodes,
+      node1,
       10,
-      sentLength = Map("node2" -> 0, "node3" -> 0),
-      ackedLength = Map("node2" -> 100, "node3" -> 100)
+      nextIndex = Map(node2 -> 101, node3 -> 101),
+      matchIndex = Map(node2 -> 0, node3 -> 0)
     )
 
     val expectedActions =
-      List(StoreState, AnnounceLeader("node1"), ReplicateLog("node2", 10, 100), ReplicateLog("node3", 10, 100))
+      List(StoreState, AnnounceLeader(node1), ReplicateLog(node2, 10, 100), ReplicateLog(node3, 10, 100))
 
-    node.onReceive(logState, VoteResponse("node2", 10, true)) shouldBe (expectedState, expectedActions)
+    node.onReceive(logState, config, VoteResponse(node2, 10, true)) shouldBe (expectedState, expectedActions)
   }
 
   it should "turn to a Follower node after receiving an AppendEntries request with higher Term" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
+
+    val command  = new WriteCommand[String] {}
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
     val logState = LogState(100, Some(10))
+    val prevLog  = LogEntry(10, 100, command)
 
-    val command = new WriteCommand[String] {}
     val request =
-      AppendEntries("node2", term = 11, logLength = 100, logTerm = 10, leaderAppliedIndex = 100, List(LogEntry(11, 101, command)))
+      AppendEntries(node2, term = 11, prevLogIndex = 100, prevLogTerm = 10, leaderCommit = 100, List(LogEntry(11, 101, command)))
 
-    val expectedResponse = AppendEntriesResponse(nodeId, 11, 101, true)
-    val expectedState    = FollowerNode(nodeId, nodes, 11, None, Some("node2"))
+    val expectedResponse = AppendEntriesResponse(node1, 11, 101, true)
+    val expectedState    = FollowerNode(node1, 11, None, Some(node2))
 
-    node.onReceive(logState, request) shouldBe (expectedState, (expectedResponse, List(StoreState, AnnounceLeader("node2"))))
+    node
+      .onReceive(logState, config, request, Some(prevLog)) shouldBe (expectedState, (
+      expectedResponse,
+      List(StoreState, AnnounceLeader(node2))
+    ))
   }
 
   it should "stays in Candidate state and reject the AppendEntries request after receiving AppendEntries with lower Term" in {
-    val node     = CandidateNode(nodeId, nodes, 10, 10, Some("node1"), Set("node1"))
-    val logState = LogState(100, Some(10))
+    val node     = CandidateNode(node1, 10, 10, Some(node1), Set(node1))
+    val logState = LogState(100, Some(10), 0)
+    val command  = new WriteCommand[String] {}
+    val prevLog  = Some(LogEntry(10, 99, command))
 
-    val command = new WriteCommand[String] {}
     val request =
-      AppendEntries("node2", term = 10, logLength = 99, logTerm = 10, leaderAppliedIndex = 99, List(LogEntry(10, 100, command)))
+      AppendEntries(node2, term = 9, prevLogIndex = 99, prevLogTerm = 9, leaderCommit = 99, List(LogEntry(10, 100, command)))
 
-    node.onReceive(logState, request) shouldBe (node, (AppendEntriesResponse(nodeId, 10, 0, false), List.empty))
+    node.onReceive(logState, config, request, prevLog) shouldBe (node, (AppendEntriesResponse(node1, 10, 99, false), List.empty))
   }
 }

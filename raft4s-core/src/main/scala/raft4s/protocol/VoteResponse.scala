@@ -1,3 +1,5 @@
 package raft4s.protocol
 
-case class VoteResponse(nodeId: String, term: Long, granted: Boolean)
+import raft4s.Node
+
+case class VoteResponse(nodeId: Node, term: Long, voteGranted: Boolean)

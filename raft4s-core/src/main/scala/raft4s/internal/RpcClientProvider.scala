@@ -5,45 +5,57 @@ import cats.effect.concurrent.Ref
 import cats.implicits._
 import cats.{Monad, MonadError}
 import io.odin.Logger
-import raft4s.Address
+import raft4s.Node
 import raft4s.protocol._
 import raft4s.rpc.{RpcClient, RpcClientBuilder}
 import raft4s.storage.Snapshot
 
 private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
-  val clients: Ref[F, Map[String, RpcClient[F]]],
-  val members: Seq[Address]
-)(implicit ME: MonadError[F, Throwable]) {
+  val clients: Ref[F, Map[Node, RpcClient[F]]],
+  val members: Seq[Node]
+)(implicit ME: MonadError[F, Throwable])
+    extends ErrorLogging[F] {
 
-  def send(serverId: String, voteRequest: VoteRequest): F[VoteResponse] =
+  def send(serverId: Node, voteRequest: VoteRequest): F[VoteResponse] =
     for {
       client  <- getClient(serverId)
       attempt <- client.send(voteRequest).attempt
       result  <- logErrors(serverId, attempt)
     } yield result
 
-  def send(serverId: String, appendEntries: AppendEntries): F[AppendEntriesResponse] =
-    for {
-      client  <- getClient(serverId)
-      attempt <- client.send(appendEntries).attempt
-      result  <- logErrors(serverId, attempt)
-    } yield result
+  def send(serverId: Node, appendEntries: AppendEntries): F[AppendEntriesResponse] =
+    errorLogging("Sending AppendEtrries") {
+      for {
+        client  <- getClient(serverId)
+        _       <- Logger[F].trace(s"Sending request ${appendEntries} to ${serverId} client: ${client}")
+        attempt <- client.send(appendEntries).attempt
+        _       <- Logger[F].trace(s"Attempt ${attempt}")
+        result  <- logErrors(serverId, attempt)
+      } yield result
+    }
 
-  def send(serverId: String, snapshot: Snapshot, lastEntry: LogEntry): F[AppendEntriesResponse] =
+  def send(serverId: Node, snapshot: Snapshot, lastEntry: LogEntry): F[AppendEntriesResponse] =
     for {
       client   <- getClient(serverId)
       attempt  <- client.send(snapshot, lastEntry).attempt
       response <- logErrors(serverId, attempt)
     } yield response
 
-  def send[T](serverId: String, command: Command[T]): F[T] =
+  def send[T](serverId: Node, command: Command[T]): F[T] =
     for {
       client  <- getClient(serverId)
       attempt <- client.send(command).attempt
       result  <- logErrors(serverId, attempt)
     } yield result
 
-  private def logErrors[T](peerId: String, result: Either[Throwable, T]): F[T] =
+  def join(serverId: Node, newNode: Node): F[Boolean] =
+    for {
+      client  <- getClient(serverId)
+      attempt <- client.join(newNode).attempt
+      result  <- logErrors(serverId, attempt)
+    } yield result
+
+  private def logErrors[T](peerId: Node, result: Either[Throwable, T]): F[T] =
     result match {
       case Left(error) =>
         Logger[F].warn(s"An error during communication with ${peerId}. Error: ${error}") *> ME.raiseError(error)
@@ -51,7 +63,7 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
         Monad[F].pure(value)
     }
 
-  private def getClient(serverId: String): F[RpcClient[F]] =
+  private def getClient(serverId: Node): F[RpcClient[F]] =
     for {
       maps <- clients.get
       possibleClient = maps.get(serverId)
@@ -59,9 +71,8 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
         if (possibleClient.isDefined)
           Monad[F].pure(possibleClient.get)
         else {
-          val serverConfig = members.find(_.toString == serverId).get //TODO
-          val c            = implicitly[RpcClientBuilder[F]].build(serverConfig)
-          clients.updateAndGet(_ + (serverConfig.id -> c)) *> Monad[F].pure(c)
+          val c = implicitly[RpcClientBuilder[F]].build(serverId)
+          clients.updateAndGet(_ + (serverId -> c)) *> Monad[F].pure(c)
 
         }
     } yield client
@@ -76,9 +87,9 @@ private[raft4s] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
 
 object RpcClientProvider {
 
-  def resource[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Address]): Resource[F, RpcClientProvider[F]] = {
+  def resource[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Node]): Resource[F, RpcClientProvider[F]] = {
     val acquire = for {
-      clients <- Ref.of[F, Map[String, RpcClient[F]]](Map.empty)
+      clients <- Ref.of[F, Map[Node, RpcClient[F]]](Map.empty)
     } yield new RpcClientProvider[F](clients, members)
 
     Resource.make(acquire)(pr => pr.closeConnections())

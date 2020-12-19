@@ -1,20 +1,23 @@
 package raft4s.log
 
 import cats.effect.Concurrent
-import cats.effect.concurrent.{Deferred, Semaphore}
+import cats.effect.concurrent.{Deferred, Ref, Semaphore}
 import cats.implicits._
 import cats.{Monad, MonadError}
 import io.odin.Logger
-import raft4s.StateMachine
+import raft4s.{Node, StateMachine}
+import raft4s.internal.MembershipManager
 import raft4s.protocol._
 import raft4s.storage.{LogStorage, Snapshot, SnapshotStorage}
 
 import scala.collection.concurrent.TrieMap
 
 class Log[F[_]: Monad: Logger](
+  commitIndexRef: Ref[F, Long],
   logStorage: LogStorage[F],
   snapshotStorage: SnapshotStorage[F],
   stateMachine: StateMachine[F],
+  membershipManager: MembershipManager[F],
   semaphore: Semaphore[F],
   compactionPolicy: LogCompactionPolicy[F]
 )(implicit ME: MonadError[F, Throwable]) {
@@ -22,77 +25,104 @@ class Log[F[_]: Monad: Logger](
   private val deferreds = TrieMap[Long, Deferred[F, Any]]()
 
   def initialize(): F[Unit] =
+    semaphore.withPermit {
+      for {
+        _                 <- Logger[F].trace("Initializing log")
+        snapshot          <- snapshotStorage.retrieveSnapshot()
+        _                 <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
+        commitIndex       <- commitIndexRef.get
+        _                 <- Logger[F].trace(s"Latest commited index ${commitIndex}")
+        stateMachineIndex <- stateMachine.appliedIndex
+        _                 <- Logger[F].trace(s"State machine applied index ${stateMachineIndex}")
+        _ <-
+          if (stateMachineIndex > commitIndex) commitIndexRef.set(stateMachineIndex)
+          else (stateMachineIndex + 1 to commitIndex).toList.traverse(commit)
+
+      } yield ()
+    }
+
+  private def restoreSnapshot(snapshot: Snapshot): F[Unit] =
     for {
-      _        <- Logger[F].trace("Initializing log")
-      snapshot <- snapshotStorage.retrieveSnapshot()
-      _        <- snapshot.map(stateMachine.restoreSnapshot).getOrElse(Monad[F].unit)
-      _        <- Logger[F].trace(s"Retrieving snapshot ${snapshot}")
+      _ <- Logger[F].trace(s"Restoring an Snapshot(index: ${snapshot.lastIndex}), ClusterConfig: ${snapshot.config}")
+      _ <- membershipManager.setClusterConfiguration(snapshot.config)
+      _ <- stateMachine.restoreSnapshot(snapshot.lastIndex, snapshot.bytes)
+      _ <- Logger[F].trace("Snapshot is restored.")
     } yield ()
 
   def installSnapshot(snapshot: Snapshot, lastEntry: LogEntry): F[Unit] =
     semaphore.withPermit {
       for {
-        length <- logStorage.length
+        lastIndex <- logStorage.lastIndex
         _ <-
-          if (length >= snapshot.lastIndex)
+          if (lastIndex >= snapshot.lastIndex)
             ME.raiseError(new RuntimeException("A new snapshot is already applied"))
           else Monad[F].unit
         _ <- Logger[F].trace(s"Installing a snapshot, ${snapshot}")
         _ <- snapshotStorage.saveSnapshot(snapshot)
         _ <- Logger[F].trace("Restoring state from snapshot")
-        _ <- stateMachine.restoreSnapshot(snapshot)
-        _ <- Logger[F].trace("Restoring state from snapshot is done")
-        _ <- Logger[F].trace(s"Snapshot installation is done ${snapshot}")
+        _ <- restoreSnapshot(snapshot)
         _ <- logStorage.put(lastEntry.index, lastEntry)
+        _ <- commitIndexRef.set(snapshot.lastIndex)
       } yield ()
     }
 
-  def getAppendEntries(leaderId: String, term: Long, sentLength: Long): F[AppendEntries] =
+  def getAppendEntries(leaderId: Node, term: Long, nextIndex: Long): F[AppendEntries] =
     for {
-      length       <- logStorage.length
-      appliedIndex <- stateMachine.appliedIndex
-      entries      <- (sentLength until length).toList.traverse(i => logStorage.get(i))
-      prevLogTerm  <- if (sentLength > 0) logStorage.get(sentLength - 1).map(_.term) else Monad[F].pure(0L)
-    } yield AppendEntries(leaderId, term, sentLength, prevLogTerm, appliedIndex, entries)
+      _           <- Logger[F].trace(s"Getting append entries since ${nextIndex}")
+      lastIndex   <- logStorage.lastIndex
+      lastEntry   <- if (nextIndex > 1) logStorage.get(nextIndex - 1).map(Option(_)) else Monad[F].pure(None)
+      commitIndex <- commitIndexRef.get
+      entries     <- (nextIndex to lastIndex).toList.traverse(i => logStorage.get(i))
+      prevLogIndex = lastEntry.map(_.index).getOrElse(0L)
+      prevLogTerm  = lastEntry.map(_.term).getOrElse(0L)
+    } yield AppendEntries(leaderId, term, prevLogIndex, prevLogTerm, commitIndex, entries)
 
   def state: F[LogState] =
     for {
-      length       <- logStorage.length
-      term         <- if (length > 0) logStorage.get(length - 1).map(e => Some(e.term)) else Monad[F].pure(None)
-      appliedIndex <- stateMachine.appliedIndex
-    } yield LogState(length, term, Some(appliedIndex))
+      lastIndex   <- logStorage.lastIndex
+      lastTerm    <- if (lastIndex > 0) logStorage.get(lastIndex).map(e => Some(e.term)) else Monad[F].pure(None)
+      commitIndex <- commitIndexRef.get
+    } yield LogState(lastIndex, lastTerm, commitIndex)
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
     for {
-      length <- logStorage.length
-      logEntry = LogEntry(term, length, command)
-      _ <- Logger[F].trace(s"Appending a command to the log. Term: ${term}, Index: ${length}")
+      lastIndex <- logStorage.lastIndex
+      logEntry = LogEntry(term, lastIndex + 1, command)
+      _ <- Logger[F].trace(s"Appending a command to the log. Term: ${term}, Index: ${lastIndex + 1}")
       _ <- logStorage.put(logEntry.index, logEntry)
       _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
     } yield logEntry
 
-  def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Unit] =
+  def appendEntries(entries: List[LogEntry], leaderLogLength: Long, leaderCommit: Long): F[Boolean] =
     semaphore.withPermit {
       for {
-        logLength    <- logStorage.length
-        appliedIndex <- stateMachine.appliedIndex
-        _            <- truncateInconsistentLogs(entries, logLength, leaderLogLength)
-        _            <- putEntries(entries, logLength, leaderLogLength)
+        lastIndex    <- logStorage.lastIndex
+        appliedIndex <- commitIndexRef.get
+        _            <- truncateInconsistentLogs(entries, lastIndex, leaderLogLength)
+        _            <- putEntries(entries, lastIndex, leaderLogLength)
         committed    <- (appliedIndex + 1 to leaderCommit).toList.traverse(commit)
         _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
-      } yield ()
+      } yield committed.nonEmpty
     }
 
-  def commitLogs(ackedLength: Map[String, Long], minAckes: Int): F[Unit] = {
-    val acked: Long => Boolean = index => ackedLength.count(_._2 >= index) >= minAckes
+  def commitLogs(matchIndex: Map[Node, Long]): F[Boolean] = {
+
+    def commitIfAcked(index: Long): F[Boolean] =
+      for {
+        config <- membershipManager.getClusterConfiguration
+        acked = config.quorumReached(matchIndex.filter(_._2 >= index).keySet)
+        res <- if (acked) commit(index) *> Monad[F].pure(true) else Monad[F].pure(false)
+      } yield res
 
     semaphore.withPermit {
       for {
-        logLength    <- logStorage.length
-        appliedIndex <- stateMachine.appliedIndex
-        committed    <- (appliedIndex + 1 until logLength).filter(i => acked(i + 1)).toList.traverse(commit)
-        _            <- if (committed.nonEmpty) compactLogs() else Monad[F].unit
-      } yield ()
+        lastIndex   <- logStorage.lastIndex
+        commitIndex <- commitIndexRef.get
+        _           <- Logger[F].trace(s"Committing entry Index ${commitIndex + 1}")
+        committed   <- (commitIndex + 1 to lastIndex).toList.traverse(commitIfAcked)
+        _           <- Logger[F].trace(s"Committed ${committed}")
+        _           <- if (committed.contains(true)) compactLogs() else Monad[F].unit
+      } yield committed.contains(true)
     }
   }
 
@@ -115,9 +145,8 @@ class Log[F[_]: Monad: Logger](
         s"Truncating unfinished log entries from the Log. Leader log Length: ${leaderLogSent}, server log length :${logLength} "
       ) *>
         logStorage.get(logLength).flatMap { entry =>
-          if (entry != null && entry.term != entries.head.term) {
-            (leaderLogSent until logLength).toList.traverse(logStorage.delete) *> Monad[F].unit
-          } else Monad[F].unit
+          if (entry != null && entry.term != entries.head.term) logStorage.deleteAfter(leaderLogSent)
+          else Monad[F].unit
         }
     } else Monad[F].unit
 
@@ -134,11 +163,16 @@ class Log[F[_]: Monad: Logger](
     for {
       _     <- Logger[F].trace(s"Committing the log entry at index ${index}")
       entry <- logStorage.get(index)
+      _     <- Logger[F].trace(s"Committing the log entry at index ${index} ${entry}")
       _     <- applyCommand(index, entry.command)
+      _     <- commitIndexRef.set(index)
     } yield ()
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
     val output = command match {
+      case command: ClusterConfigurationCommand =>
+        membershipManager.setClusterConfiguration(command.toConfig)
+
       case command: ReadCommand[_] =>
         stateMachine.applyRead.apply(command)
 
@@ -154,23 +188,24 @@ class Log[F[_]: Monad: Logger](
     }
   }
 
-  private def takeSnapshot(): F[Unit] =
-    for {
-      _        <- Logger[F].trace("Starting to take snapshot")
-      snapshot <- stateMachine.takeSnapshot()
-      _        <- snapshotStorage.saveSnapshot(snapshot)
-      _        <- Logger[F].trace(s"Snapshot is stored ${snapshot}")
-      _        <- Logger[F].trace(s"Deleting logs before ${snapshot.lastIndex}")
-      _        <- logStorage.deleteBefore(snapshot.lastIndex)
-      _        <- Logger[F].trace(s"Logs before ${snapshot.lastIndex} are deleted.")
-
-    } yield ()
-
   private def compactLogs() =
     for {
       logState <- this.state
       eligible <- compactionPolicy.eligible(logState, stateMachine)
       _        <- if (eligible) takeSnapshot() else Monad[F].unit
+    } yield ()
+
+  private def takeSnapshot(): F[Unit] =
+    for {
+      _        <- Logger[F].trace("Starting to take snapshot")
+      snapshot <- stateMachine.takeSnapshot()
+      config   <- membershipManager.getClusterConfiguration
+      _        <- snapshotStorage.saveSnapshot(Snapshot(snapshot._1, snapshot._2, config))
+      _        <- Logger[F].trace(s"Snapshot is stored ${snapshot}")
+      _        <- Logger[F].trace(s"Deleting logs before ${snapshot._1}")
+      _        <- logStorage.deleteBefore(snapshot._1)
+      _        <- Logger[F].trace(s"Logs before ${snapshot._1} are deleted.")
+
     } yield ()
 }
 
@@ -179,9 +214,20 @@ object Log {
     logStorage: LogStorage[F],
     snapshotStorage: SnapshotStorage[F],
     stateMachine: StateMachine[F],
-    compactionPolicy: LogCompactionPolicy[F]
+    compactionPolicy: LogCompactionPolicy[F],
+    membershipManager: MembershipManager[F],
+    lastCommitIndex: Long
   ): F[Log[F]] =
     for {
-      lock <- Semaphore[F](1)
-    } yield new Log(logStorage, snapshotStorage, stateMachine, lock, compactionPolicy)
+      lock           <- Semaphore[F](1)
+      commitIndexRef <- Ref.of[F, Long](lastCommitIndex)
+    } yield new Log(
+      commitIndexRef,
+      logStorage,
+      snapshotStorage,
+      stateMachine,
+      membershipManager,
+      lock,
+      compactionPolicy
+    )
 }
