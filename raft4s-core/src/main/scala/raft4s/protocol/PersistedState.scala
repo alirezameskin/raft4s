@@ -1,5 +1,9 @@
 package raft4s.protocol
 
 import raft4s.Node
+import raft4s.node.{FollowerNode, NodeState}
 
-private[raft4s] case class PersistedState(term: Long, votedFor: Option[Node], appliedIndex: Long = 0L)
+case class PersistedState(term: Long, votedFor: Option[Node], appliedIndex: Long = 0L) {
+  def toNodeState(nodeId: Node): NodeState =
+    FollowerNode(nodeId, term, votedFor = votedFor)
+}

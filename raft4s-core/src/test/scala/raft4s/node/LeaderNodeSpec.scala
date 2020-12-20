@@ -3,8 +3,7 @@ package raft4s.node
 import org.scalatest.flatspec._
 import org.scalatest.matchers._
 import raft4s.Node
-import raft4s.log.LogState
-import raft4s.protocol._
+import raft4s.protocol.{LogState, _}
 
 class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
   val node1  = Node("node1", 1080)

@@ -20,11 +20,23 @@ lazy val core = (project in file("raft4s-core"))
   .settings(
     name := "raft4s-core",
     libraryDependencies ++= Seq(
+      "com.github.valskalla" %% "odin-core" % OdinVersion,
+      "org.scalatest"        %% "scalatest" % ScalaTestVersion % Test
+    )
+  )
+
+lazy val effect = (project in file("raft4s-effect"))
+  .settings(GlobalSettingsGroup)
+  .settings(
+    name := "raft4s-effect",
+    libraryDependencies ++= Seq(
       "org.typelevel"        %% "cats-effect" % CatsEffectVersion,
       "com.github.valskalla" %% "odin-core"   % OdinVersion,
       "org.scalatest"        %% "scalatest"   % ScalaTestVersion % Test
     )
   )
+  .dependsOn(core)
+  .aggregate(core)
 
 lazy val grpc = (project in file("raft4s-grpc"))
   .settings(GlobalSettingsGroup)
@@ -55,7 +67,7 @@ lazy val rocksdb = (project in file("raft4s-rocksdb"))
   .aggregate(core)
 
 lazy val root = (project in file("."))
-  .aggregate(rocksdb, core, grpc)
+  .aggregate(rocksdb, core, effect, grpc)
   .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s",

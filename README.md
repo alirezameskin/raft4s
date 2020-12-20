@@ -15,8 +15,8 @@ Complete example implementation can be found on [https://github.com/alirezameski
 resolvers += "raft4s".at("https://maven.pkg.github.com/alirezameskin/raft4s")
 
 libraryDependencies ++= Seq(
-  "com.github.alirezameskin" %% "raft4s-core"         % "0.0.3",
-  "com.github.alirezameskin" %% "raft4s-grpc"         % "0.0.3"
+  "com.github.alirezameskin" %% "raft4s-effect" % "0.0.3"
+  "com.github.alirezameskin" %% "raft4s-grpc"   % "0.0.3"
 )
 ```
 
@@ -24,16 +24,19 @@ libraryDependencies ++= Seq(
 
 ```scala
 
-import cats.effect.{ExitCode, IO, IOApp, Resource}
-import io.odin._
+package demo
+
+import cats.effect.IO
+import cats.effect.concurrent.Ref
+import raft4s.StateMachine
 import raft4s.protocol.{ReadCommand, WriteCommand}
-import raft4s.rpc.grpc.io.implicits._
-import raft4s.storage.memory.MemoryStorage
-import raft4s.{Address, Configuration, RaftCluster}
+
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+import java.nio.ByteBuffer
 
 case class SetCommand(key: String, value: String) extends WriteCommand[String]
-case class DeleteCommand(key: String)             extends WriteCommand[Unit]
-case class GetCommand(key: String)                extends ReadCommand[String]
+case class DeleteCommand(key: String) extends WriteCommand[Unit]
+case class GetCommand(key: String) extends ReadCommand[String]
 
 class KvStateMachine(lastIndex: Ref[IO, Long], map: Ref[IO, Map[String, String]]) extends StateMachine[IO] {
 
@@ -51,31 +54,33 @@ class KvStateMachine(lastIndex: Ref[IO, Long], map: Ref[IO, Map[String, String]]
       } yield ()
   }
 
-  override def applyRead: PartialFunction[ReadCommand[_], IO[Any]] = { case GetCommand(key) =>
-    for {
-      items <- map.get
-      _ = println(items)
-    } yield items(key)
+  override def applyRead: PartialFunction[ReadCommand[_], IO[Any]] = {
+    case GetCommand(key) =>
+      for {
+        items <- map.get
+        _ = println(items)
+      } yield items(key)
   }
 
   override def appliedIndex: IO[Long] = lastIndex.get
 
-  override def takeSnapshot(): IO[Snapshot] =
+  override def takeSnapshot(): IO[(Long, ByteBuffer)] =
     for {
       items <- map.get
       index <- lastIndex.get
       bytes = serialize(items)
-    } yield Snapshot(index, bytes)
+    } yield (index, bytes)
 
-  override def restoreSnapshot(snapshot: Snapshot): IO[Unit] =
+
+  override def restoreSnapshot(index: Long, bytes: ByteBuffer): IO[Unit] =
     for {
-      _ <- map.set(deserialize(snapshot.bytes))
-      _ <- lastIndex.set(snapshot.lastIndex)
+      _ <- map.set(deserialize(bytes))
+      _ <- lastIndex.set(index)
     } yield ()
 
   private def serialize(items: Map[String, String]): ByteBuffer = {
     val stream: ByteArrayOutputStream = new ByteArrayOutputStream()
-    val oos                           = new ObjectOutputStream(stream)
+    val oos = new ObjectOutputStream(stream)
     oos.writeObject(items)
     oos.close
 
@@ -84,19 +89,20 @@ class KvStateMachine(lastIndex: Ref[IO, Long], map: Ref[IO, Map[String, String]]
 
   private def deserialize(bytes: ByteBuffer): Map[String, String] = {
 
-    val ois      = new ObjectInputStream(new ByteArrayInputStream(bytes.array()))
+    val ois = new ObjectInputStream(new ByteArrayInputStream(bytes.array()))
     val response = ois.readObject().asInstanceOf[Map[String, String]]
     ois.close()
 
     response
   }
+
 }
 
 object KvStateMachine {
   def empty: IO[KvStateMachine] =
     for {
-      index <- Ref.of[IO, Long](-1L)
-      map   <- Ref.of[IO, Map[String, String]](Map.empty)
+      index <- Ref.of[IO, Long](0L)
+      map <- Ref.of[IO, Map[String, String]](Map.empty)
     } yield new KvStateMachine(index, map)
 }
 ```
@@ -104,18 +110,20 @@ object KvStateMachine {
 #### Creating the cluster
 
 ```scala
+package demo
+
 import cats.effect.{ExitCode, IO, IOApp, Resource}
-import io.odin._
-import raft4s.demo.kvstore.command.{GetCommand, SetCommand}
-import raft4s.rpc.grpc.io.implicits._
-import raft4s.storage.memory.MemoryStorage
-import raft4s.{Address, Configuration, RaftCluster}
+import io.odin.consoleLogger
+import raft4s.effect.rpc.grpc.io.implicits._
+import raft4s.effect.storage.memory.MemoryStorage
+import raft4s.effect.{RaftCluster, odinLogger}
+import raft4s.{Cluster, Configuration, Node}
 
 object SampleKVApp extends IOApp {
 
-  val config = Configuration(Address("localhost", 8090), List(Address("localhost", 8091), Address("localhost", 8092)))
+  val config = Configuration(Node("localhost", 8090), List.empty)
 
-  implicit val logger: Logger[IO] = consoleLogger()
+  implicit val logger = odinLogger[IO](consoleLogger())
 
   override def run(args: List[String]): IO[ExitCode] =
     makeCluster(config).use { cluster =>
@@ -129,7 +137,7 @@ object SampleKVApp extends IOApp {
       } yield ExitCode.Success
     }
 
-  private def makeCluster(config: Configuration): Resource[IO, RaftCluster[IO]] =
+  private def makeCluster(config: Configuration): Resource[IO, Cluster[IO]] =
     for {
       stateMachine <- Resource.liftF(KvStateMachine.empty)
       storage      <- Resource.liftF(MemoryStorage.empty[IO])
