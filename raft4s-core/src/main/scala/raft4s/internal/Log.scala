@@ -38,7 +38,7 @@ abstract class Log[F[_]] {
         snapshot          <- snapshotStorage.retrieveSnapshot()
         _                 <- snapshot.map(restoreSnapshot).getOrElse(Monad[F].unit)
         commitIndex       <- getCommitIndex
-        _                 <- logger.trace(s"Latest commited index ${commitIndex}")
+        _                 <- logger.trace(s"Latest committed index ${commitIndex}")
         stateMachineIndex <- stateMachine.appliedIndex
         _                 <- logger.trace(s"State machine applied index ${stateMachineIndex}")
         _ <-
@@ -62,7 +62,7 @@ abstract class Log[F[_]] {
     for {
       res <-
         if (stateMachine.applyRead.isDefinedAt(command)) stateMachine.applyRead(command).asInstanceOf[F[T]]
-        else ME.raiseError(new RuntimeException("Can not run the command"))
+        else ME.raiseError(new RuntimeException("Could not run the command"))
     } yield res
 
   private def applyCommand(index: Long, command: Command[_]): F[Unit] = {
@@ -142,9 +142,7 @@ abstract class Log[F[_]] {
       for {
         lastIndex   <- logStorage.lastIndex
         commitIndex <- getCommitIndex
-        _           <- logger.trace(s"Committing entry Index ${commitIndex + 1}")
         committed   <- (commitIndex + 1 to lastIndex).toList.traverse(commitIfMatched(matchIndex, _))
-        _           <- logger.trace(s"Committed ${committed}")
         _           <- if (committed.contains(true)) compactLogs() else Monad[F].unit
       } yield committed.contains(true)
     }

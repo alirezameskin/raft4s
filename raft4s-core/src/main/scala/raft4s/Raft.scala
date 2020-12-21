@@ -179,7 +179,7 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
     }
 
   def onReceive(msg: AppendEntriesResponse): F[Unit] =
-    errorLogging("Receiving AppendEntrriesResponse") {
+    errorLogging("Receiving AppendEntriesResponse") {
       withPermit {
         for {
           _            <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
@@ -216,24 +216,23 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
       _      <- addMember(config, member)
     } yield ()
 
-  private def addMember(config: ClusterConfiguration, member: Node): F[Unit] = {
+  private def addMember(config: ClusterConfiguration, member: Node): F[Unit] =
     if (config.members.contains(member)) {
       Applicative[F].unit
+    } else {
+      val oldMembers = config.members
+      val newMembers = oldMembers + member
+      val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
+
+      for {
+        _ <- membershipManager.setClusterConfiguration(newConfig)
+        _ <- logger.trace(s"Committing a joint configuration ${newConfig}")
+        _ <- onCommand[Unit](JointConfigurationCommand(oldMembers, newMembers))
+        _ <- logger.trace("Joint configuration is committed")
+        _ <- onCommand[Unit](NewConfigurationCommand(newMembers))
+        _ <- logger.trace("New configuration is committed")
+      } yield ()
     }
-
-    val oldMembers = config.members
-    val newMembers = oldMembers + member
-    val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
-
-    for {
-      _ <- membershipManager.setClusterConfiguration(newConfig)
-      _ <- logger.trace(s"Commiting a joint configuration ${newConfig}")
-      _ <- onCommand[Unit](JointConfigurationCommand(oldMembers, newMembers))
-      _ <- logger.trace("Joint configuration is commited")
-      _ <- onCommand[Unit](NewConfigurationCommand(newMembers))
-      _ <- logger.trace("New configuration is commited")
-    } yield ()
-  }
 
   def removeMember(member: Node): F[Unit] =
     for {
@@ -241,24 +240,24 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
       _      <- removeMember(config, member)
     } yield ()
 
-  private def removeMember(config: ClusterConfiguration, member: Node): F[Unit] = {
+  private def removeMember(config: ClusterConfiguration, member: Node): F[Unit] =
     if (!config.members.contains(member)) {
       Applicative[F].unit
+    } else {
+
+      val oldMembers = config.members.toSet
+      val newMembers = oldMembers - member
+      val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
+
+      for {
+        _ <- membershipManager.setClusterConfiguration(newConfig)
+        _ <- logger.trace(s"Committing a joint configuration ${newConfig}")
+        _ <- onCommand[Unit](JointConfigurationCommand(oldMembers, newMembers))
+        _ <- logger.trace("Joint configuration is committed")
+        _ <- onCommand[Unit](NewConfigurationCommand(newMembers))
+        _ <- logger.trace("New configuration is committed")
+      } yield ()
     }
-
-    val oldMembers = config.members.toSet
-    val newMembers = oldMembers - member
-    val newConfig  = JointClusterConfiguration(oldMembers, newMembers)
-
-    for {
-      _ <- membershipManager.setClusterConfiguration(newConfig)
-      _ <- logger.trace(s"Committing a joint configuration ${newConfig}")
-      _ <- onCommand[Unit](JointConfigurationCommand(oldMembers, newMembers))
-      _ <- logger.trace("Joint configuration is committed")
-      _ <- onCommand[Unit](NewConfigurationCommand(newMembers))
-      _ <- logger.trace("New configuration is committed")
-    } yield ()
-  }
 
   def onCommand[T](command: Command[T]): F[T] =
     errorLogging("Receiving Command") {
