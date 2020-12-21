@@ -38,6 +38,17 @@ lazy val effect = (project in file("raft4s-effect"))
   .dependsOn(core)
   .aggregate(core)
 
+lazy val future = (project in file("raft4s-future"))
+  .settings(GlobalSettingsGroup)
+  .settings(
+    name := "raft4s-future",
+    libraryDependencies ++= Seq(
+      "org.scalatest"        %% "scalatest"   % ScalaTestVersion % Test
+    )
+  )
+  .dependsOn(core)
+  .aggregate(core)
+
 lazy val grpc = (project in file("raft4s-grpc"))
   .settings(GlobalSettingsGroup)
   .settings(
