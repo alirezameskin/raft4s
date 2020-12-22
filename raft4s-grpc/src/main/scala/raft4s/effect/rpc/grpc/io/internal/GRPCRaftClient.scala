@@ -3,7 +3,7 @@ package raft4s.effect.rpc.grpc.io.internal
 import cats.effect.{ContextShift, IO}
 import com.google.protobuf
 import io.grpc.ManagedChannel
-import raft4s.Node
+import raft4s.{Command, LogEntry, Node}
 import raft4s.grpc.protos
 import raft4s.grpc.protos.JoinRequest
 import raft4s.internal.Logger

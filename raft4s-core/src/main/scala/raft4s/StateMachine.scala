@@ -1,7 +1,5 @@
 package raft4s
 
-import raft4s.protocol.{ReadCommand, WriteCommand}
-
 import java.nio.ByteBuffer
 
 trait StateMachine[F[_]] {

@@ -1,7 +1,7 @@
 package raft4s.effect.storage.memory
 
 import cats.Monad
-import raft4s.protocol.LogEntry
+import raft4s.LogEntry
 import raft4s.storage.LogStorage
 
 import scala.collection.mutable

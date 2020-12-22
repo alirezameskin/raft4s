@@ -28,8 +28,7 @@ package demo
 
 import cats.effect.IO
 import cats.effect.concurrent.Ref
-import raft4s.StateMachine
-import raft4s.protocol.{ReadCommand, WriteCommand}
+import raft4s.{ReadCommand, StateMachine, WriteCommand}
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.nio.ByteBuffer
@@ -116,7 +115,7 @@ import cats.effect.{ExitCode, IO, IOApp, Resource}
 import io.odin.consoleLogger
 import raft4s.effect.rpc.grpc.io.implicits._
 import raft4s.effect.storage.memory.MemoryStorage
-import raft4s.effect.{RaftCluster, odinLogger}
+import raft4s.effect.{odinLogger, RaftCluster}
 import raft4s.{Cluster, Configuration, Node}
 
 object SampleKVApp extends IOApp {

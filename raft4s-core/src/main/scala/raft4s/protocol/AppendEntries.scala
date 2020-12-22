@@ -1,6 +1,6 @@
 package raft4s.protocol
 
-import raft4s.Node
+import raft4s.{LogEntry, Node}
 
 case class AppendEntries(
   leaderId: Node,

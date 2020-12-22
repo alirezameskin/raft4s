@@ -1,6 +1,6 @@
 package raft4s.rpc
 
-import raft4s.Node
+import raft4s.{Command, LogEntry, Node}
 import raft4s.protocol._
 import raft4s.storage.Snapshot
 

@@ -1,7 +1,8 @@
 package raft4s.node
 
-import raft4s.Node
+import raft4s.{LogEntry, Node}
 import raft4s.protocol._
+import raft4s.storage.PersistedState
 
 case class CandidateNode(
   node: Node,

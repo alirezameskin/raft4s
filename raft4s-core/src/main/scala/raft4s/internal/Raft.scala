@@ -1,8 +1,8 @@
-package raft4s
+package raft4s.internal
 
 import cats.implicits._
 import cats.{Applicative, Monad, MonadError}
-import raft4s.internal._
+import raft4s._
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.protocol._
 

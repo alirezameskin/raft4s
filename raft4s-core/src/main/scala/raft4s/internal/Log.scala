@@ -2,9 +2,9 @@ package raft4s.internal
 
 import cats.implicits._
 import cats.{Monad, MonadError}
+import raft4s._
 import raft4s.protocol._
 import raft4s.storage.{LogStorage, Snapshot, SnapshotStorage}
-import raft4s.{LogCompactionPolicy, Node, StateMachine}
 
 import scala.collection.concurrent.TrieMap
 

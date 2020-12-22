@@ -4,45 +4,49 @@ import cats.effect.{Resource, Sync}
 import cats.implicits._
 import org.rocksdb.Options
 import org.{rocksdb => jrocks}
+import raft4s.LogEntry
 import raft4s.internal.{ErrorLogging, Logger}
-import raft4s.internal.serializer.{LongSerializer, ObjectSerializer}
-import raft4s.protocol.LogEntry
 import raft4s.storage.LogStorage
+import raft4s.storage.serialization.Serializer
 
 import java.nio.file.Path
 import scala.util.Try
 
-class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStorage[F] with ErrorLogging[F] {
+class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB)(implicit LS: Serializer[Long], ES: Serializer[LogEntry])
+    extends LogStorage[F]
+    with ErrorLogging[F] {
 
   override def lastIndex: F[Long] =
     errorLogging("Fetching the log length") {
       Sync[F].delay {
-        val iterator = db.newIterator()
-        iterator.seekToLast()
-
-        if (iterator.isValid) {
-          val bytes    = iterator.value()
-          val logEntry = ObjectSerializer.decode[LogEntry](bytes)
-          logEntry.index
-        } else {
-          0
-        }
+        tryLastIndex.flatMap(Serializer[LogEntry].fromBytes).map(_.index).getOrElse(0)
       }
     }
+
+  private def tryLastIndex: Option[Array[Byte]] = {
+    val iterator = db.newIterator()
+    iterator.seekToLast()
+
+    if (iterator.isValid) {
+      Option(iterator.value())
+    } else {
+      None
+    }
+  }
 
   override def get(index: Long): F[LogEntry] =
     errorLogging(s"Fetching a LogEntry at index ${index}") {
       Sync[F].delay {
-        val bytes = db.get(LongSerializer.toBytes(index))
-        Option(bytes).map(ObjectSerializer.decode[LogEntry]).orNull
+        val bytes = db.get(Serializer[Long].toBytes(index))
+        Option(bytes).flatMap(Serializer[LogEntry].fromBytes).orNull
       }
     }
 
   override def put(index: Long, logEntry: LogEntry): F[LogEntry] =
     errorLogging(s"Putting a LogEntry at index ${index}") {
       Sync[F].delay {
-        val bytes = ObjectSerializer.encode(logEntry)
-        val key   = LongSerializer.toBytes(index)
+        val bytes = Serializer[LogEntry].toBytes(logEntry)
+        val key   = Serializer[Long].toBytes(index)
 
         db.put(key, bytes)
 
@@ -60,14 +64,14 @@ class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStora
         val iterator = new Iterator[Long] {
           override def hasNext: Boolean = itr.isValid
           override def next(): Long = {
-            val index = LongSerializer.toLong(itr.key())
+            val index = Serializer[Long].fromBytes(itr.key())
             itr.next()
 
-            index
+            index.get
           }
         }
 
-        iterator.takeWhile(_ < index).map(LongSerializer.toBytes).foreach(db.delete)
+        iterator.takeWhile(_ < index).map(Serializer[Long].toBytes).foreach(db.delete)
       }
     }
 
@@ -76,26 +80,26 @@ class RocksDBLogStorage[F[_]: Sync: Logger](db: jrocks.RocksDB) extends LogStora
       Sync[F].delay {
 
         val itr = db.newIterator()
-        itr.seek(LongSerializer.toBytes(index))
+        itr.seek(Serializer[Long].toBytes(index))
 
         val iterator = new Iterator[Long] {
           override def hasNext: Boolean = itr.isValid
           override def next(): Long = {
-            val index = LongSerializer.toLong(itr.key())
+            val index = Serializer[Long].fromBytes(itr.key())
             itr.next()
 
-            index
+            index.get
           }
         }
 
-        iterator.takeWhile(_ > index).map(LongSerializer.toBytes).foreach(db.delete)
+        iterator.takeWhile(_ > index).map(Serializer[Long].toBytes).foreach(db.delete)
       }
     }
 }
 
 object RocksDBLogStorage {
 
-  def open[F[_]: Sync: Logger](path: Path): Resource[F, LogStorage[F]] = {
+  def open[F[_]: Sync: Logger](path: Path)(implicit L: Serializer[Long], E: Serializer[LogEntry]): Resource[F, LogStorage[F]] = {
     val options = new Options().setCreateIfMissing(true)
 
     val acquire = for {

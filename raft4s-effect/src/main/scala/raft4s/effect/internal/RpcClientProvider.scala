@@ -4,7 +4,7 @@ import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import cats.{Monad, MonadError}
-import raft4s.Node
+import raft4s.{Command, LogEntry, Node}
 import raft4s.internal.{ErrorLogging, Logger}
 import raft4s.protocol._
 import raft4s.rpc.{RpcClient, RpcClientBuilder}

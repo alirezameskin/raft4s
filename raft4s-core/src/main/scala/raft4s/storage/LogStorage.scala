@@ -1,6 +1,6 @@
 package raft4s.storage
 
-import raft4s.protocol.LogEntry
+import raft4s.LogEntry
 
 trait LogStorage[F[_]] {
 

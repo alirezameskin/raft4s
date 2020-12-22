@@ -1,14 +1,13 @@
-package raft4s.effect
+package raft4s.effect.internal
 
 import cats.effect.concurrent.{Ref, Semaphore}
 import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
-import raft4s.effect.internal._
 import raft4s.internal.{Deferred, Logger}
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.rpc.RpcClientBuilder
-import raft4s._
+import raft4s.{internal, _}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
@@ -26,7 +25,7 @@ private[effect] class Raft[F[_]: Monad: Concurrent: Timer](
   lastHeartbeatRef: Ref[F, Long],
   isRunning: Ref[F, Boolean]
 )(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
-    extends raft4s.Raft[F] {
+    extends internal.Raft[F] {
   override val nodeId: Node = config.local
 
   override def setRunning(running: Boolean): F[Unit] =

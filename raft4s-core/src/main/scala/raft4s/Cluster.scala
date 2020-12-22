@@ -2,7 +2,7 @@ package raft4s
 
 import cats.implicits._
 import cats.Monad
-import raft4s.protocol.Command
+import raft4s.internal.Raft
 import raft4s.rpc.RpcServer
 
 class Cluster[F[_]: Monad](rpc: RpcServer[F], raft: Raft[F]) {

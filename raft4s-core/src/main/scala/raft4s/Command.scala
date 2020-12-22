@@ -1,6 +1,6 @@
-package raft4s.protocol
+package raft4s
 
-import raft4s.Node
+import raft4s.protocol.{ClusterConfiguration, JointClusterConfiguration, NewClusterConfiguration}
 
 sealed trait Command[OUT] extends Serializable
 trait ReadCommand[OUT]    extends Command[OUT]
