@@ -30,8 +30,8 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val node     = LeaderNode(node1, 10, Map.empty, Map.empty)
     val logState = LogState(100, Some(10))
 
-    val expectedNode    = node.copy(matchIndex = Map(node3 -> 100), nextIndex = Map(node3 -> 100))
-    val expectedActions = List(ReplicateLog(node3, 10, 100))
+    val expectedNode    = node.copy(matchIndex = Map(node3 -> 100), nextIndex = Map(node3 -> 101))
+    val expectedActions = List(ReplicateLog(node3, 10, 101))
     val expectedResult  = (expectedNode, (VoteResponse(node1, 10, false), expectedActions))
 
     node.onReceive(logState, config, VoteRequest(node3, 9, 100, 9)) shouldBe expectedResult
@@ -90,7 +90,7 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val node     = LeaderNode(node1, 10, Map(node2 -> 100, node3 -> 100), Map(node2 -> 0, node3 -> 0))
     val logState = LogState(101, Some(10))
 
-    val expectedNode    = LeaderNode(node1, 10, Map(node2 -> 101, node3 -> 100), Map(node2 -> 101, node3 -> 0))
+    val expectedNode    = LeaderNode(node1, 10, matchIndex = Map(node2 -> 101, node3 -> 100), nextIndex = Map(node2 -> 102, node3 -> 0))
     val expectedActions = List(CommitLogs(Map(node2 -> 101, node3 -> 100, node1 -> 101)))
 
     node.onReceive(logState, config, AppendEntriesResponse(node2, 10, 101, true)) shouldBe (expectedNode, expectedActions)
