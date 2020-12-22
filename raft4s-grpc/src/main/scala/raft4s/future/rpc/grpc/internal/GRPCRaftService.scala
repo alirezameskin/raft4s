@@ -1,10 +1,11 @@
 package raft4s.future.rpc.grpc.internal
 
+import raft4s._
 import raft4s.grpc.protos
-import raft4s.internal.Logger
+import raft4s.internal.{Logger, Raft}
 import raft4s.protocol._
+import raft4s.rpc.internal.ObjectSerializer
 import raft4s.storage.Snapshot
-import raft4s.{Node, Raft}
 
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
