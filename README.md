@@ -5,6 +5,8 @@ An implementation of [the Raft distributed consensus](https://raft.github.io/) a
 ### Implemented features
 * Leader Election
 * Log replication
+* Cluster configuration
+* Log Compaction
 
 ### Usage
 Complete example implementation can be found on [https://github.com/alirezameskin/raft4s-kvstore-example](https://github.com/alirezameskin/raft4s-kvstore-example)
