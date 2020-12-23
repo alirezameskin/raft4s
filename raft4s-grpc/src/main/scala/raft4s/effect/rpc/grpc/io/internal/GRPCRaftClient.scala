@@ -3,34 +3,29 @@ package raft4s.effect.rpc.grpc.io.internal
 import cats.effect.{ContextShift, IO}
 import com.google.protobuf
 import io.grpc.ManagedChannel
-import raft4s.{Command, LogEntry, Node}
 import raft4s.grpc.protos
 import raft4s.grpc.protos.JoinRequest
 import raft4s.internal.Logger
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
 import raft4s.storage.Snapshot
+import raft4s.{Command, LogEntry, Node}
 
 import java.util.concurrent.TimeUnit
-import scala.concurrent.{blocking, ExecutionContext}
+import scala.concurrent.blocking
 
-private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit
-  CS: ContextShift[IO],
-  EC: ExecutionContext,
-  logger: Logger[IO]
-) extends RpcClient[IO] {
+private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit CS: ContextShift[IO], logger: Logger[IO])
+    extends RpcClient[IO] {
 
   val stub = protos.RaftGrpc.stub(channel)
 
   override def send(req: VoteRequest): IO[VoteResponse] = {
-    val request = protos.VoteRequest(req.nodeId.id, req.term, req.lastLogIndex, req.lastLogTerm)
-    val response =
-      stub
-        .vote(request)
-        .map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
+    val request  = protos.VoteRequest(req.nodeId.id, req.term, req.lastLogIndex, req.lastLogTerm)
+    val response = stub.vote(request)
 
     IO
       .fromFuture(IO(response))
+      .map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
       .handleErrorWith { error =>
         logger.warn(s"An error in sending VoteRequest to node: ${address}, Error: ${error.getMessage}") *> IO
           .raiseError(error)
@@ -49,13 +44,11 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
       )
     )
 
-    val response =
-      stub
-        .appendEntries(request)
-        .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
+    val response = stub.appendEntries(request)
 
     IO
       .fromFuture(IO(response))
+      .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
       .handleErrorWith { error =>
         logger.warn(s"An error in sending AppendEntries request to node: ${address}, Error: ${error.getMessage}") *> IO
           .raiseError(error)
@@ -64,10 +57,11 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
 
   override def send[T](command: Command[T]): IO[T] = {
     val request  = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
-    val response = stub.execute(request).map(response => ObjectSerializer.decode[T](response.output))
+    val response = stub.execute(request)
 
     IO
       .fromFuture(IO(response))
+      .map(response => ObjectSerializer.decode[T](response.output))
       .handleErrorWith { error =>
         logger.warn(s"An error in sending a command to node: ${address}. Command: ${command}, Error: ${error.getMessage}") *> IO
           .raiseError(error)
@@ -82,12 +76,12 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
         protobuf.ByteString.copyFrom(snapshot.bytes.array()),
         ObjectSerializer.encode[ClusterConfiguration](snapshot.config)
       )
-    val response = stub
-      .installSnapshot(request)
-      .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
+
+    val response = stub.installSnapshot(request)
 
     IO
       .fromFuture(IO(response))
+      .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
       .handleErrorWith { error =>
         logger.warn(
           s"An error in sending a snapshot to node: ${address}. Snapshot: ${snapshot}, Error: ${error.getMessage}"

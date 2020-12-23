@@ -7,9 +7,9 @@ import cats.implicits._
 import raft4s.Node
 import raft4s.internal.Logger
 
-private[effect] class LeaderAnnouncer[F[_]: Monad: Concurrent: Logger](
-  val announcer: Ref[F, Deferred[F, Node]]
-) extends raft4s.internal.LeaderAnnouncer[F] {
+private[effect] class LeaderAnnouncer[F[_]: Monad: Concurrent: Logger](val announcer: Ref[F, Deferred[F, Node]])
+    extends raft4s.internal.LeaderAnnouncer[F] {
+
   def announce(leader: Node): F[Unit] =
     for {
       _        <- Logger[F].info(s"A new leader is elected among the members. New Leader is '${leader}'.")

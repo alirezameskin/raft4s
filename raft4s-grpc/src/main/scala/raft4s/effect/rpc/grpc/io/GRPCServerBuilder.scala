@@ -2,11 +2,11 @@ package raft4s.effect.rpc.grpc.io
 
 import _root_.io.grpc.ServerBuilder
 import cats.effect.IO
+import raft4s.Node
 import raft4s.effect.rpc.grpc.io.internal.GRPCRaftService
 import raft4s.grpc.protos
 import raft4s.internal.{Logger, Raft}
 import raft4s.rpc.{RpcServer, RpcServerBuilder}
-import raft4s.Node
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
