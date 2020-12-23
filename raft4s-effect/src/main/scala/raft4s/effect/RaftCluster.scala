@@ -18,7 +18,10 @@ object RaftCluster {
       config,
       storage,
       stateMachine,
-      FixedSizeLogCompaction(config.logCompactionThreshold)
+      if (config.logCompactionThreshold <= 0)
+        LogCompactionPolicy.noCompaction
+      else
+        LogCompactionPolicy.fixedSize(config.logCompactionThreshold)
     )
 
   def resource[F[_]: Monad: Parallel: Concurrent: RpcServerBuilder: RpcClientBuilder: Timer: Logger](
