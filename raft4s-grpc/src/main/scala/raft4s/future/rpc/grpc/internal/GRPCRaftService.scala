@@ -10,7 +10,8 @@ import raft4s.storage.Snapshot
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-private[grpc] class GRPCRaftService(raft: Raft[Future])(implicit val logger: Logger[Future], EC: ExecutionContext) extends protos.RaftGrpc.Raft {
+private[grpc] class GRPCRaftService(raft: Raft[Future])(implicit val logger: Logger[Future], EC: ExecutionContext)
+    extends protos.RaftGrpc.Raft {
 
   override def vote(request: protos.VoteRequest): Future[protos.VoteResponse] =
     raft

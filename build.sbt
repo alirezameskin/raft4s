@@ -43,7 +43,7 @@ lazy val future = (project in file("raft4s-future"))
   .settings(
     name := "raft4s-future",
     libraryDependencies ++= Seq(
-      "org.scalatest"        %% "scalatest"   % ScalaTestVersion % Test
+      "org.scalatest" %% "scalatest" % ScalaTestVersion % Test
     )
   )
   .dependsOn(core)
@@ -78,7 +78,7 @@ lazy val rocksdb = (project in file("raft4s-rocksdb"))
   .aggregate(core)
 
 lazy val root = (project in file("."))
-  .aggregate(rocksdb, core, effect, grpc)
+  .aggregate(rocksdb, core, effect, grpc, future)
   .settings(GlobalSettingsGroup)
   .settings(
     name := "raft4s",

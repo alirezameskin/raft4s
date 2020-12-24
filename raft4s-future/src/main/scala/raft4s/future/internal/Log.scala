@@ -1,11 +1,11 @@
-package raft4s.future
+package raft4s.future.internal
 
 import cats.MonadError
-import raft4s.StateMachine
 import raft4s.internal.{Logger, MembershipManager}
-import raft4s.log.LogCompactionPolicy
 import raft4s.storage.{LogStorage, SnapshotStorage}
+import raft4s.{LogCompactionPolicy, StateMachine}
 
+import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.{ExecutionContext, Future}
 
 class Log(
@@ -13,15 +13,22 @@ class Log(
   val snapshotStorage: SnapshotStorage[Future],
   val stateMachine: StateMachine[Future],
   val membershipManager: MembershipManager[Future],
-  val compactionPolicy: LogCompactionPolicy[Future]
+  val compactionPolicy: LogCompactionPolicy[Future],
+  val lastCommit: Long
 )(implicit val ME: MonadError[Future, Throwable], val logger: Logger[Future])
-    extends raft4s.log.Log[Future] {
+    extends raft4s.internal.Log[Future] {
 
-  override def withPermit[A](t: Future[A]): Future[A] = ???
+  private val lastCommitIndex = new AtomicLong(lastCommit)
 
-  override def getCommitIndex: Future[Long] = ???
+  override def withPermit[A](t: Future[A]): Future[A] =
+    //???
+    t
 
-  override def setCommitIndex(index: Long): Future[Unit] = ???
+  override def getCommitIndex: Future[Long] =
+    Future.successful(lastCommitIndex.get())
+
+  override def setCommitIndex(index: Long): Future[Unit] =
+    Future.successful(lastCommitIndex.set(index))
 }
 
 object Log {
@@ -32,12 +39,13 @@ object Log {
     compactionPolicy: LogCompactionPolicy[Future],
     membershipManager: MembershipManager[Future],
     lastCommitIndex: Long
-  )(implicit L: Logger[Future], EX: ExecutionContext): raft4s.log.Log[Future] =
+  )(implicit L: Logger[Future], EX: ExecutionContext): raft4s.internal.Log[Future] =
     new Log(
       logStorage,
       snapshotStorage,
       stateMachine,
       membershipManager,
-      compactionPolicy
+      compactionPolicy,
+      lastCommitIndex
     )
 }

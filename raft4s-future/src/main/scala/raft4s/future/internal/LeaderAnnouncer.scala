@@ -5,7 +5,8 @@ import raft4s.Node
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-private[future] class LeaderAnnouncer(promise: Promise[Node]) (implicit EC: ExecutionContext) extends raft4s.internal.LeaderAnnouncer[Future] {
+private[future] class LeaderAnnouncer(promise: Promise[Node])(implicit EC: ExecutionContext)
+    extends raft4s.internal.LeaderAnnouncer[Future] {
   private val promiseRef = new AtomicReference[Promise[Node]](promise)
 
   override def announce(leader: Node): Future[Unit] =

@@ -1,10 +1,11 @@
 package raft4s.future.rpc.grpc
 
-import cats.effect.IO
 import raft4s.internal.Logger
+
+import scala.concurrent.{ExecutionContext, Future}
 
 object implicits {
 
-  implicit def clientBuilder(implicit L: Logger[IO]) = new GRPCClientBuilder
-  implicit def serverBuilder(implicit L: Logger[IO]) = new GRPCServerBuilder
+  implicit def clientBuilder(implicit EC: ExecutionContext, L: Logger[Future]) = new GRPCClientBuilder
+  implicit def serverBuilder(implicit EC: ExecutionContext, L: Logger[Future]) = new GRPCServerBuilder
 }

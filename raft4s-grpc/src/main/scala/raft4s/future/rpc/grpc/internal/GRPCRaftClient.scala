@@ -12,7 +12,7 @@ import raft4s.rpc.internal.ObjectSerializer
 import raft4s.storage.Snapshot
 
 import java.util.concurrent.TimeUnit
-import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.concurrent.{blocking, ExecutionContext, Future}
 
 private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit
   EC: ExecutionContext,
@@ -24,9 +24,9 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
   override def send(req: VoteRequest): Future[VoteResponse] = {
     val request = protos.VoteRequest(req.nodeId.id, req.term, req.lastLogIndex, req.lastLogTerm)
 
-      stub
-        .vote(request)
-        .map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
+    stub
+      .vote(request)
+      .map(res => VoteResponse(toNode(res.nodeId), res.term, res.granted))
 
   }
 
@@ -42,14 +42,14 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
       )
     )
 
-      stub
-        .appendEntries(request)
-        .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
+    stub
+      .appendEntries(request)
+      .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
   }
 
   override def send[T](command: Command[T]): Future[T] = {
-    val request  = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
-stub.execute(request).map(response => ObjectSerializer.decode[T](response.output))
+    val request = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
+    stub.execute(request).map(response => ObjectSerializer.decode[T](response.output))
 
   }
 
@@ -61,7 +61,7 @@ stub.execute(request).map(response => ObjectSerializer.decode[T](response.output
         protobuf.ByteString.copyFrom(snapshot.bytes.array()),
         ObjectSerializer.encode[ClusterConfiguration](snapshot.config)
       )
-stub
+    stub
       .installSnapshot(request)
       .map(res => AppendEntriesResponse(toNode(res.nodeId), res.currentTerm, res.ack, res.success))
 
@@ -71,7 +71,7 @@ stub
     stub.join(JoinRequest(node.host, node.port)).map(_ => true)
 
   override def close(): Future[Unit] =
-    Future{
+    Future {
       channel.shutdown()
       if (!blocking(channel.awaitTermination(30, TimeUnit.SECONDS))) {
         channel.shutdownNow()

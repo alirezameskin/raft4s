@@ -2,9 +2,9 @@ package raft4s.future
 
 import cats.MonadError
 import raft4s.internal.{LeaderAnnouncer, LogReplicator, MembershipManager, RpcClientProvider, _}
-import raft4s.log.{Log, LogCompactionPolicy}
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
-import raft4s.{Configuration, Node, StateMachine, Storage}
+import raft4s.rpc.RpcClientBuilder
+import raft4s._
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -22,7 +22,7 @@ class Raft(
   val storage: Storage[Future],
   state: NodeState
 )(implicit val ME: MonadError[Future, Throwable], val logger: Logger[Future], EC: ExecutionContext)
-    extends raft4s.Raft[Future] {
+    extends raft4s.internal.Raft[Future] {
   override val nodeId: Node = config.local
 
   private val lock = new ReentrantReadWriteLock()
@@ -112,16 +112,23 @@ object Raft {
     storage: Storage[Future],
     stateMachine: StateMachine[Future],
     compactionPolicy: LogCompactionPolicy[Future]
-  )(implicit EC: ExecutionContext, L: Logger[Future]): Future[Raft] =
+  )(implicit EC: ExecutionContext, L: Logger[Future], CB: RpcClientBuilder[Future]): Future[Raft] =
     for {
       persistedState <- storage.stateStorage.retrieveState()
       nodeState      = persistedState.map(_.toNodeState(config.local)).getOrElse(FollowerNode(config.local, 0L))
       appliedIndex   = persistedState.map(_.appliedIndex).getOrElse(0L)
       clientProvider = raft4s.future.internal.RpcClientProvider.build
       membership     = raft4s.future.internal.MembershipManager.build(config.members.toSet + config.local)
-      log            = raft4s.future.Log.build(storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
-      replicator     = raft4s.future.internal.LogReplicator.build(config.local, clientProvider, log)
-      announcer      = raft4s.future.internal.LeaderAnnouncer.build
+      log = raft4s.future.internal.Log.build(
+        storage.logStorage,
+        storage.snapshotStorage,
+        stateMachine,
+        compactionPolicy,
+        membership,
+        appliedIndex
+      )
+      replicator = raft4s.future.internal.LogReplicator.build(config.local, clientProvider, log)
+      announcer  = raft4s.future.internal.LeaderAnnouncer.build
     } yield new Raft(
       config,
       membership,
