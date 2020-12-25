@@ -1,13 +1,13 @@
 package raft4s.effect.internal
 
-import cats.effect.concurrent.{Ref, Semaphore}
+import cats.effect.concurrent.Ref
 import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
+import raft4s._
 import raft4s.internal.{Deferred, Logger}
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.rpc.RpcClientBuilder
-import raft4s.{internal, _}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
@@ -21,11 +21,10 @@ private[effect] class Raft[F[_]: Monad: Concurrent: Timer](
   val log: Log[F],
   val storage: Storage[F],
   stateRef: Ref[F, NodeState],
-  semaphore: Semaphore[F],
   lastHeartbeatRef: Ref[F, Long],
   isRunning: Ref[F, Boolean]
 )(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
-    extends internal.Raft[F] {
+    extends raft4s.internal.Raft[F] {
   override val nodeId: Node = config.local
 
   override def setRunning(running: Boolean): F[Unit] =
@@ -39,9 +38,6 @@ private[effect] class Raft[F[_]: Monad: Concurrent: Timer](
 
   override def setCurrentState(state: NodeState): F[Unit] =
     stateRef.set(state)
-
-  override def withPermit[A](fa: => F[A]): F[A] =
-    semaphore.withPermit(fa)
 
   override def background[A](fa: => F[A]): F[Unit] =
     Concurrent[F].start(fa) *> Monad[F].unit
@@ -111,19 +107,6 @@ object Raft {
       heartbeat      <- Ref.of[F, Long](0L)
       ref            <- Ref.of[F, NodeState](nodeState)
       running        <- Ref.of[F, Boolean](false)
-      semaphore      <- Semaphore[F](1)
-    } yield new Raft[F](
-      config,
-      membership,
-      clientProvider,
-      announcer,
-      replicator,
-      log,
-      storage,
-      ref,
-      semaphore,
-      heartbeat,
-      running
-    )
+    } yield new Raft[F](config, membership, clientProvider, announcer, replicator, log, storage, ref, heartbeat, running)
 
 }

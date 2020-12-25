@@ -34,8 +34,6 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
 
   def setCurrentState(state: NodeState): F[Unit]
 
-  def withPermit[A](t: => F[A]): F[A]
-
   def background[A](fa: => F[A]): F[Unit]
 
   def updateLastHeartbeat: F[Unit]
@@ -111,103 +109,79 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
 
   def onReceive(msg: VoteRequest): F[VoteResponse] =
     errorLogging("Receiving VoteRequest") {
-      withPermit {
-        for {
-          _            <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.lastLogTerm}, ${msg}")
-          logState     <- log.state
-          config       <- membershipManager.getClusterConfiguration
-          currentState <- getCurrentState
-          result = currentState.onReceive(logState, config, msg)
-          _ <- setCurrentState(result._1)
+      for {
+        _        <- logger.trace(s"A Vote request received from ${msg.nodeId}, Term: ${msg.lastLogTerm}, ${msg}")
+        logState <- log.state
+        config   <- membershipManager.getClusterConfiguration
+        result   <- modifyState(_.onReceive(logState, config, msg))
 
-          (response, actions) = result._2
+        (response, actions) = result
 
-          _ <- runActions(actions)
-          _ <- logger.trace(s"Vote response to the request ${response}")
-          _ <- if (response.voteGranted) updateLastHeartbeat else Monad[F].unit
-        } yield response
-      }
+        _ <- runActions(actions)
+        _ <- logger.trace(s"Vote response to the request ${response}")
+        _ <- if (response.voteGranted) updateLastHeartbeat else Monad[F].unit
+      } yield response
     }
 
   def onReceive(msg: VoteResponse): F[Unit] =
     errorLogging("Receiving VoteResponse") {
-      withPermit {
-        for {
-          _            <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.voteGranted}, ${msg}")
-          logState     <- log.state
-          config       <- membershipManager.getClusterConfiguration
-          currentState <- getCurrentState
-          result = currentState.onReceive(logState, config, msg)
-          _ <- setCurrentState(result._1)
-          actions = result._2
-          _ <- runActions(actions)
-        } yield ()
-      }
+      for {
+        _        <- logger.trace(s"A Vote response received from ${msg.nodeId}, Granted: ${msg.voteGranted}, ${msg}")
+        logState <- log.state
+        config   <- membershipManager.getClusterConfiguration
+        actions  <- modifyState(_.onReceive(logState, config, msg))
+        _        <- runActions(actions)
+      } yield ()
     }
 
   def onReceive(msg: AppendEntries): F[AppendEntriesResponse] =
     errorLogging(s"Receiving an AppendEntries Term: ${msg.term} PreviousLogIndex:${msg.prevLogIndex}") {
-      withPermit {
-        for {
-          _ <- logger.trace(
-            s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}"
-          )
-          logState      <- log.state
-          localPreEntry <- log.get(msg.prevLogIndex).map(Option(_))
-          config        <- membershipManager.getClusterConfiguration
-          current       <- getCurrentState
-          _             <- logger.trace(s"Current state ${current}")
-          _             <- logger.trace(s"Log state ${logState}")
-          _             <- updateLastHeartbeat
+      for {
+        _ <- logger.trace(
+          s"A AppendEntries request received from ${msg.leaderId}, contains ${msg.entries.size} entries, ${msg}"
+        )
+        logState      <- log.state
+        localPreEntry <- log.get(msg.prevLogIndex).map(Option(_))
+        config        <- membershipManager.getClusterConfiguration
+        result        <- modifyState(_.onReceive(logState, config, msg, localPreEntry))
+        _             <- updateLastHeartbeat
 
-          (nextState, (response, actions)) = current.onReceive(logState, config, msg, localPreEntry)
+        (response, actions) = result
 
-          _ <- setCurrentState(nextState)
-          _ <- logger.trace(s"AppendEntriesReponse ${response}")
-          _ <- logger.trace(s"Actions ${actions}")
-          _ <- runActions(actions)
-          appended <-
-            if (response.success) {
-              for {
-                appended <- log.appendEntries(msg.entries, msg.prevLogIndex, msg.leaderCommit)
-              } yield appended
-            } else
-              Monad[F].pure(false)
-          _ <- if (appended) storeState() else Monad[F].unit
-        } yield response
-      }
+        _ <- logger.trace(s"AppendEntriesReponse ${response}")
+        _ <- logger.trace(s"Actions ${actions}")
+        _ <- runActions(actions)
+        appended <-
+          if (response.success) {
+            for {
+              appended <- log.appendEntries(msg.entries, msg.prevLogIndex, msg.leaderCommit)
+            } yield appended
+          } else
+            Monad[F].pure(false)
+        _ <- if (appended) storeState() else Monad[F].unit
+      } yield response
     }
 
   def onReceive(msg: AppendEntriesResponse): F[Unit] =
     errorLogging("Receiving AppendEntriesResponse") {
-      withPermit {
-        for {
-          _            <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
-          logState     <- log.state
-          config       <- membershipManager.getClusterConfiguration
-          currentState <- getCurrentState
-          result = currentState.onReceive(logState, config, msg)
-          _ <- setCurrentState(result._1)
-          actions = result._2
-          _ <- logger.trace(s"Actions ${actions}")
-          _ <- runActions(actions)
-        } yield ()
-      }
+      for {
+        _        <- logger.trace(s"A AppendEntriesResponse received from ${msg.nodeId}. ${msg}")
+        logState <- log.state
+        config   <- membershipManager.getClusterConfiguration
+        actions  <- modifyState(_.onReceive(logState, config, msg))
+        _        <- logger.trace(s"Actions ${actions}")
+        _        <- runActions(actions)
+      } yield ()
     }
 
   def onReceive(msg: InstallSnapshot): F[AppendEntriesResponse] =
     errorLogging("Receiving InstallSnapshot") {
-      withPermit {
-        for {
-          _            <- log.installSnapshot(msg.snapshot, msg.lastEntry)
-          logState     <- log.state
-          config       <- membershipManager.getClusterConfiguration
-          currentState <- getCurrentState
-          result = currentState.onSnapshotInstalled(logState, config)
-          _ <- setCurrentState(result._1)
-          response = result._2
-        } yield response
-      }
+      for {
+        _        <- log.installSnapshot(msg.snapshot, msg.lastEntry)
+        logState <- log.state
+        config   <- membershipManager.getClusterConfiguration
+        response <- modifyState(_.onSnapshotInstalled(logState, config))
+      } yield response
     }
 
   def addMember(member: Node): F[Unit] =
@@ -393,14 +367,11 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
 
   private def runElection(): F[Unit] =
     for {
-      _            <- delayElection()
-      logState     <- log.state
-      cluster      <- membershipManager.getClusterConfiguration
-      currentState <- getCurrentState
-      result  = currentState.onTimer(logState, cluster)
-      actions = result._2
-      _ <- setCurrentState(result._1)
-      _ <- runActions(actions)
+      _        <- delayElection()
+      logState <- log.state
+      cluster  <- membershipManager.getClusterConfiguration
+      actions  <- modifyState(_.onTimer(logState, cluster))
+      _        <- runActions(actions)
     } yield ()
 
   private def scheduleReplication(): F[Unit] =
@@ -424,5 +395,12 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
         } yield ()
       }
     }
+
+  private def modifyState[B](f: NodeState => (NodeState, B)): F[B] =
+    for {
+      currentState <- getCurrentState
+      result = f(currentState)
+      _ <- setCurrentState(result._1)
+    } yield result._2
 
 }
