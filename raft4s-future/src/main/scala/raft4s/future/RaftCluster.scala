@@ -1,9 +1,10 @@
 package raft4s.future
 
 import cats.implicits._
+import raft4s._
+import raft4s.future.internal.impl.RaftImpl
 import raft4s.internal.Logger
 import raft4s.rpc.{RpcClientBuilder, RpcServerBuilder}
-import raft4s._
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -21,7 +22,7 @@ object RaftCluster {
     L: Logger[Future]
   ): Future[Cluster[Future]] =
     for {
-      raft   <- Raft.build(config, storage, stateMachine, compactionPolicy)
+      raft   <- RaftImpl.build(config, storage, stateMachine, compactionPolicy)
       server <- RpcServerBuilder[Future].build(config.local, raft)
     } yield new Cluster[Future](server, raft)
 }

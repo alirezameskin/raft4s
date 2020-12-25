@@ -1,5 +1,6 @@
-package raft4s.future.internal
+package raft4s.future.internal.impl
 
+import raft4s.internal.RpcClientProvider
 import raft4s.protocol.{AppendEntries, AppendEntriesResponse, VoteRequest, VoteResponse}
 import raft4s.rpc.{RpcClient, RpcClientBuilder}
 import raft4s.storage.Snapshot
@@ -8,10 +9,10 @@ import raft4s.{Command, LogEntry, Node}
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
-private[future] class RpcClientProvider(clients: Map[Node, RpcClient[Future]])(implicit
+private[future] class RpcClientProviderImpl(clients: Map[Node, RpcClient[Future]])(implicit
   EC: ExecutionContext,
   builder: RpcClientBuilder[Future]
-) extends raft4s.internal.RpcClientProvider[Future] {
+) extends RpcClientProvider[Future] {
 
   private val clientsRef = new AtomicReference[Map[Node, RpcClient[Future]]](clients)
 
@@ -46,7 +47,7 @@ private[future] class RpcClientProvider(clients: Map[Node, RpcClient[Future]])(i
   }
 }
 
-object RpcClientProvider {
-  def build(implicit EC: ExecutionContext, builder: RpcClientBuilder[Future]): raft4s.internal.RpcClientProvider[Future] =
-    new RpcClientProvider(Map.empty)
+object RpcClientProviderImpl {
+  def build(implicit EC: ExecutionContext, builder: RpcClientBuilder[Future]): RpcClientProvider[Future] =
+    new RpcClientProviderImpl(Map.empty)
 }

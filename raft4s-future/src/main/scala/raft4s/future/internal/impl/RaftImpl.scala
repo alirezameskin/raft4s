@@ -1,18 +1,17 @@
-package raft4s.future
+package raft4s.future.internal.impl
 
 import cats.MonadError
-import raft4s.internal.{LeaderAnnouncer, LogReplicator, MembershipManager, RpcClientProvider, _}
+import raft4s._
+import raft4s.internal._
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.rpc.RpcClientBuilder
-import raft4s._
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
-import java.util.concurrent.locks.ReentrantReadWriteLock
 import java.util.concurrent.{Executors, TimeUnit}
 import scala.concurrent.duration.{FiniteDuration, NANOSECONDS}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-class Raft(
+private[future] class RaftImpl(
   val config: Configuration,
   val membershipManager: MembershipManager[Future],
   val clientProvider: RpcClientProvider[Future],
@@ -22,10 +21,8 @@ class Raft(
   val storage: Storage[Future],
   state: NodeState
 )(implicit val ME: MonadError[Future, Throwable], val logger: Logger[Future], EC: ExecutionContext)
-    extends raft4s.internal.Raft[Future] {
+    extends Raft[Future] {
   override val nodeId: Node = config.local
-
-  private val lock = new ReentrantReadWriteLock()
 
   private val isRunningRef = new AtomicBoolean(false)
   private val heartbeatRef = new AtomicLong(0L)
@@ -40,20 +37,6 @@ class Raft(
   override def getCurrentState: Future[NodeState] = Future(nodeStateRef.get())
 
   override def setCurrentState(state: NodeState): Future[Unit] = Future(nodeStateRef.set(state))
-
-  override def withPermit[A](code: => Future[A]): Future[A] = {
-    val currentLock = lock.writeLock()
-
-    ME.attempt(code).flatMap {
-      case Right(result) =>
-        currentLock.unlock()
-        Future.apply(result)
-
-      case Left(error) =>
-        currentLock.unlock()
-        Future.failed(error)
-    }
-  }
 
   override def background[A](fa: => Future[A]): Future[Unit] =
     ME.attempt(fa).flatMap(_ => ME.unit)
@@ -101,42 +84,33 @@ class Raft(
       }
     }
 
+  override def stop: Future[Unit] =
+    for {
+      _ <- super.stop
+      _ <- logger.trace("Stopping the scheduler")
+      _ <- Future(scheduler.shutdown())
+    } yield ()
+
   private def random(min: Long, max: Long): Long =
     min + scala.util.Random.nextLong(max - min)
 }
 
-object Raft {
+object RaftImpl {
 
   def build(
     config: Configuration,
     storage: Storage[Future],
     stateMachine: StateMachine[Future],
     compactionPolicy: LogCompactionPolicy[Future]
-  )(implicit EC: ExecutionContext, L: Logger[Future], CB: RpcClientBuilder[Future]): Future[Raft] =
+  )(implicit EC: ExecutionContext, L: Logger[Future], CB: RpcClientBuilder[Future]): Future[RaftImpl] =
     for {
       persistedState <- storage.stateStorage.retrieveState()
       nodeState      = persistedState.map(_.toNodeState(config.local)).getOrElse(FollowerNode(config.local, 0L))
       appliedIndex   = persistedState.map(_.appliedIndex).getOrElse(0L)
-      clientProvider = raft4s.future.internal.RpcClientProvider.build
-      membership     = raft4s.future.internal.MembershipManager.build(config.members.toSet + config.local)
-      log = raft4s.future.internal.Log.build(
-        storage.logStorage,
-        storage.snapshotStorage,
-        stateMachine,
-        compactionPolicy,
-        membership,
-        appliedIndex
-      )
-      replicator = raft4s.future.internal.LogReplicator.build(config.local, clientProvider, log)
-      announcer  = raft4s.future.internal.LeaderAnnouncer.build
-    } yield new Raft(
-      config,
-      membership,
-      clientProvider,
-      announcer,
-      replicator,
-      log,
-      storage,
-      nodeState
-    )
+      clientProvider = RpcClientProviderImpl.build
+      membership     = MembershipManagerImpl.build(config.members.toSet + config.local)
+      log            = LogImpl.build(storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
+      replicator     = LogReplicatorImpl.build(config.local, clientProvider, log)
+      announcer      = LeaderAnnouncerImpl.build
+    } yield new RaftImpl(config, membership, clientProvider, announcer, replicator, log, storage, nodeState)
 }
