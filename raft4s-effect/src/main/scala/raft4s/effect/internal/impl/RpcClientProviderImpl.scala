@@ -1,21 +1,21 @@
-package raft4s.effect.internal
+package raft4s.effect.internal.impl
 
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import cats.{Monad, MonadError}
-import raft4s.{Command, LogEntry, Node}
-import raft4s.internal.{ErrorLogging, Logger}
+import raft4s.internal.{ErrorLogging, Logger, RpcClientProvider}
 import raft4s.protocol._
 import raft4s.rpc.{RpcClient, RpcClientBuilder}
 import raft4s.storage.Snapshot
+import raft4s.{Command, LogEntry, Node}
 
-private[effect] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
-  val clients: Ref[F, Map[Node, RpcClient[F]]],
+private[effect] class RpcClientProviderImpl[F[_]: Monad: RpcClientBuilder: Logger](
+  val clientsRef: Ref[F, Map[Node, RpcClient[F]]],
   val members: Seq[Node]
 )(implicit ME: MonadError[F, Throwable])
     extends ErrorLogging[F]
-    with raft4s.internal.RpcClientProvider[F] {
+    with RpcClientProvider[F] {
 
   def send(serverId: Node, voteRequest: VoteRequest): F[VoteResponse] =
     for {
@@ -25,7 +25,7 @@ private[effect] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
     } yield result
 
   def send(serverId: Node, appendEntries: AppendEntries): F[AppendEntriesResponse] =
-    errorLogging("Sending AppendEtrries") {
+    errorLogging("Sending AppendEtries") {
       for {
         client  <- getClient(serverId)
         _       <- Logger[F].trace(s"Sending request ${appendEntries} to ${serverId} client: ${client}")
@@ -66,14 +66,14 @@ private[effect] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
 
   private def getClient(serverId: Node): F[RpcClient[F]] =
     for {
-      maps <- clients.get
+      maps <- clientsRef.get
       possibleClient = maps.get(serverId)
       client <-
         if (possibleClient.isDefined)
           Monad[F].pure(possibleClient.get)
         else {
           val c = implicitly[RpcClientBuilder[F]].build(serverId)
-          clients.updateAndGet(_ + (serverId -> c)) *> Monad[F].pure(c)
+          clientsRef.updateAndGet(_ + (serverId -> c)) *> Monad[F].pure(c)
 
         }
     } yield client
@@ -81,15 +81,15 @@ private[effect] class RpcClientProvider[F[_]: Monad: RpcClientBuilder: Logger](
   def closeConnections(): F[Unit] =
     for {
       _     <- Logger[F].trace("Close all connections to other members")
-      items <- clients.get
+      items <- clientsRef.get
       _     <- items.values.toList.traverse(_.close())
     } yield ()
 }
 
-object RpcClientProvider {
+object RpcClientProviderImpl {
 
-  def build[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Node]): F[RpcClientProvider[F]] =
+  def build[F[_]: Monad: Sync: RpcClientBuilder: Logger](members: Seq[Node]): F[RpcClientProviderImpl[F]] =
     for {
       clients <- Ref.of[F, Map[Node, RpcClient[F]]](Map.empty)
-    } yield new RpcClientProvider[F](clients, members)
+    } yield new RpcClientProviderImpl[F](clients, members)
 }

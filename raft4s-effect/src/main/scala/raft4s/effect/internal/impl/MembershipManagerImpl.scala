@@ -1,31 +1,32 @@
-package raft4s.effect.internal
+package raft4s.effect.internal.impl
 
 import cats.Monad
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import raft4s.Node
+import raft4s.internal.MembershipManager
 import raft4s.protocol.{ClusterConfiguration, NewClusterConfiguration}
 
 import scala.collection.immutable.Set
 
-private[effect] class MembershipManager[F[_]: Monad](clusterConfiguration: Ref[F, ClusterConfiguration])
-    extends raft4s.internal.MembershipManager[F] {
+private[effect] class MembershipManagerImpl[F[_]: Monad](configurationRef: Ref[F, ClusterConfiguration])
+    extends MembershipManager[F] {
 
   def members: F[Set[Node]] =
-    clusterConfiguration.get.map(_.members)
+    configurationRef.get.map(_.members)
 
   def setClusterConfiguration(newConfig: ClusterConfiguration): F[Unit] =
-    clusterConfiguration.set(newConfig)
+    configurationRef.set(newConfig)
 
   def getClusterConfiguration: F[ClusterConfiguration] =
-    clusterConfiguration.get
+    configurationRef.get
 
 }
 
-object MembershipManager {
-  def build[F[_]: Monad: Sync](members: Set[Node]): F[MembershipManager[F]] =
+object MembershipManagerImpl {
+  def build[F[_]: Monad: Sync](members: Set[Node]): F[MembershipManagerImpl[F]] =
     for {
       config <- Ref.of[F, ClusterConfiguration](NewClusterConfiguration(members))
-    } yield new MembershipManager[F](config)
+    } yield new MembershipManagerImpl[F](config)
 }

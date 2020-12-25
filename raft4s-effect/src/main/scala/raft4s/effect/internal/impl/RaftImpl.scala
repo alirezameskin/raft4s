@@ -1,30 +1,31 @@
-package raft4s.effect.internal
+package raft4s.effect.internal.impl
 
 import cats.effect.concurrent.Ref
 import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import raft4s._
-import raft4s.internal.{Deferred, Logger}
+import raft4s.internal.{Deferred, Logger, Raft}
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.rpc.RpcClientBuilder
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
-private[effect] class Raft[F[_]: Monad: Concurrent: Timer](
+private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
   val config: Configuration,
-  val membershipManager: MembershipManager[F],
-  val clientProvider: RpcClientProvider[F],
-  val leaderAnnouncer: LeaderAnnouncer[F],
-  val logReplicator: LogReplicator[F],
-  val log: Log[F],
+  val membershipManager: MembershipManagerImpl[F],
+  val clientProvider: RpcClientProviderImpl[F],
+  val leaderAnnouncer: LeaderAnnouncerImpl[F],
+  val logReplicator: LogReplicatorImpl[F],
+  val log: LogImpl[F],
   val storage: Storage[F],
   stateRef: Ref[F, NodeState],
   lastHeartbeatRef: Ref[F, Long],
   isRunning: Ref[F, Boolean]
 )(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
-    extends raft4s.internal.Raft[F] {
+    extends Raft[F] {
+
   override val nodeId: Node = config.local
 
   override def setRunning(running: Boolean): F[Unit] =
@@ -87,26 +88,27 @@ private[effect] class Raft[F[_]: Monad: Concurrent: Timer](
     Sync[F].delay(min + scala.util.Random.nextInt(max - min))
 }
 
-object Raft {
+object RaftImpl {
 
   def build[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
     config: Configuration,
     storage: Storage[F],
     stateMachine: StateMachine[F],
     compactionPolicy: LogCompactionPolicy[F]
-  ): F[Raft[F]] =
+  ): F[RaftImpl[F]] =
     for {
       persistedState <- storage.stateStorage.retrieveState()
       nodeState    = persistedState.map(_.toNodeState(config.local)).getOrElse(FollowerNode(config.local, 0L))
       appliedIndex = persistedState.map(_.appliedIndex).getOrElse(0L)
-      clientProvider <- RpcClientProvider.build[F](config.members)
-      membership     <- MembershipManager.build[F](config.members.toSet + config.local)
-      log            <- Log.build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
-      replicator     <- LogReplicator.build[F](config.local, clientProvider, log)
-      announcer      <- LeaderAnnouncer.build[F]
-      heartbeat      <- Ref.of[F, Long](0L)
-      ref            <- Ref.of[F, NodeState](nodeState)
-      running        <- Ref.of[F, Boolean](false)
-    } yield new Raft[F](config, membership, clientProvider, announcer, replicator, log, storage, ref, heartbeat, running)
+      clientProvider <- RpcClientProviderImpl.build[F](config.members)
+      membership     <- MembershipManagerImpl.build[F](config.members.toSet + config.local)
+      log <- LogImpl
+        .build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
+      replicator <- LogReplicatorImpl.build[F](config.local, clientProvider, log)
+      announcer  <- LeaderAnnouncerImpl.build[F]
+      heartbeat  <- Ref.of[F, Long](0L)
+      ref        <- Ref.of[F, NodeState](nodeState)
+      running    <- Ref.of[F, Boolean](false)
+    } yield new RaftImpl[F](config, membership, clientProvider, announcer, replicator, log, storage, ref, heartbeat, running)
 
 }

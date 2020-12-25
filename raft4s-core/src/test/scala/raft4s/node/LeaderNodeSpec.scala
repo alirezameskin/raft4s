@@ -90,7 +90,8 @@ class LeaderNodeSpec extends AnyFlatSpec with should.Matchers {
     val node     = LeaderNode(node1, 10, Map(node2 -> 100, node3 -> 100), Map(node2 -> 0, node3 -> 0))
     val logState = LogState(101, Some(10))
 
-    val expectedNode    = LeaderNode(node1, 10, matchIndex = Map(node2 -> 101, node3 -> 100), nextIndex = Map(node2 -> 102, node3 -> 0))
+    val expectedNode =
+      LeaderNode(node1, 10, matchIndex = Map(node2 -> 101, node3 -> 100), nextIndex = Map(node2 -> 102, node3 -> 0))
     val expectedActions = List(CommitLogs(Map(node2 -> 101, node3 -> 100, node1 -> 101)))
 
     node.onReceive(logState, config, AppendEntriesResponse(node2, 10, 101, true)) shouldBe (expectedNode, expectedActions)

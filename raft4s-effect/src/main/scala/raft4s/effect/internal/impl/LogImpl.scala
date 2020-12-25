@@ -1,14 +1,14 @@
-package raft4s.effect.internal
+package raft4s.effect.internal.impl
 
 import cats.effect.Concurrent
 import cats.effect.concurrent.{Ref, Semaphore}
 import cats.implicits._
 import cats.{Monad, MonadError}
-import raft4s.internal.{Logger, MembershipManager}
+import raft4s.internal.{Log, Logger, MembershipManager}
 import raft4s.storage.{LogStorage, SnapshotStorage}
-import raft4s.{internal, LogCompactionPolicy, StateMachine}
+import raft4s.{LogCompactionPolicy, StateMachine}
 
-class Log[F[_]: Monad: Logger](
+private[effect] class LogImpl[F[_]: Monad: Logger](
   val logStorage: LogStorage[F],
   val snapshotStorage: SnapshotStorage[F],
   val stateMachine: StateMachine[F],
@@ -17,7 +17,7 @@ class Log[F[_]: Monad: Logger](
   commitIndexRef: Ref[F, Long],
   semaphore: Semaphore[F]
 )(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
-    extends internal.Log[F] {
+    extends Log[F] {
 
   override def withPermit[A](t: F[A]): F[A] =
     semaphore.withPermit(t)
@@ -29,7 +29,7 @@ class Log[F[_]: Monad: Logger](
     commitIndexRef.set(index)
 }
 
-object Log {
+object LogImpl {
   def build[F[_]: Concurrent: Logger](
     logStorage: LogStorage[F],
     snapshotStorage: SnapshotStorage[F],
@@ -37,17 +37,9 @@ object Log {
     compactionPolicy: LogCompactionPolicy[F],
     membershipManager: MembershipManager[F],
     lastCommitIndex: Long
-  ): F[Log[F]] =
+  ): F[LogImpl[F]] =
     for {
       lock           <- Semaphore[F](1)
       commitIndexRef <- Ref.of[F, Long](lastCommitIndex)
-    } yield new Log(
-      logStorage,
-      snapshotStorage,
-      stateMachine,
-      membershipManager,
-      compactionPolicy,
-      commitIndexRef,
-      lock
-    )
+    } yield new LogImpl(logStorage, snapshotStorage, stateMachine, membershipManager, compactionPolicy, commitIndexRef, lock)
 }
