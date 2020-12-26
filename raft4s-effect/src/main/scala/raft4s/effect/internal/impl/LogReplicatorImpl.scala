@@ -29,7 +29,6 @@ private[effect] class LogReplicatorImpl[F[_]: Concurrent: Logger](
           log
             .getAppendEntries(leaderId, term, nextIndex)
             .map { req =>
-              println(req)
               req
             }
             .flatMap(request => clients.send(peerId, request))

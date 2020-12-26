@@ -24,7 +24,7 @@ class GRPCServerBuilder(implicit EC: ExecutionContext, L: Logger[Future]) extend
 
       new RpcServer[Future] {
         override def start: Future[Unit] =
-          Future.successful(server.start())
+          Future(server.start())
 
         override def stop: Future[Unit] =
           Future {

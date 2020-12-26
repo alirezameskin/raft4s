@@ -5,6 +5,7 @@ import raft4s.internal.{Log, Logger, MembershipManager}
 import raft4s.storage.{LogStorage, SnapshotStorage}
 import raft4s.{LogCompactionPolicy, StateMachine}
 
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -15,14 +16,19 @@ private[future] class LogImpl(
   val membershipManager: MembershipManager[Future],
   val compactionPolicy: LogCompactionPolicy[Future],
   val lastCommit: Long
-)(implicit val ME: MonadError[Future, Throwable], val logger: Logger[Future])
+)(implicit val ME: MonadError[Future, Throwable], val logger: Logger[Future], EC: ExecutionContext)
     extends Log[Future] {
 
   private val lastCommitIndex = new AtomicLong(lastCommit)
+  private val semaphore       = new Semaphore(1)
 
-  override def withPermit[A](t: Future[A]): Future[A] =
-    //???
-    t
+  override def withPermit[A](code: => Future[A]): Future[A] =
+    this.synchronized {
+      semaphore.acquire()
+      val task = code
+      task.onComplete(_ => semaphore.release())
+      task
+    }
 
   override def getCommitIndex: Future[Long] =
     Future.successful(lastCommitIndex.get())

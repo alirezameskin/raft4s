@@ -13,7 +13,6 @@ class GRPCClientBuilder(implicit EC: ExecutionContext, L: Logger[Future]) extend
 
     val builder: ManagedChannelBuilder[_] = ManagedChannelBuilder
       .forAddress(node.host, node.port)
-      .disableRetry()
       .usePlaintext()
 
     new GRPCRaftClient(node, builder.build())

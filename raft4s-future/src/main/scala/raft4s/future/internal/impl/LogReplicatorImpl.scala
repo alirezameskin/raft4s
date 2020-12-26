@@ -27,7 +27,6 @@ private[future] class LogReplicatorImpl(leaderId: Node, log: Log[Future], client
           log
             .getAppendEntries(leaderId, term, nextIndex)
             .map { req =>
-              println(req)
               req
             }
             .flatMap(request => clients.send(peerId, request))

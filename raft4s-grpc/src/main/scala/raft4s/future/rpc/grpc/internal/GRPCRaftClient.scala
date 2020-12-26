@@ -14,7 +14,7 @@ import raft4s.storage.Snapshot
 import java.util.concurrent.TimeUnit
 import scala.concurrent.{blocking, ExecutionContext, Future}
 
-private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit
+private[grpc] class GRPCRaftClient(node: Node, channel: ManagedChannel)(implicit
   EC: ExecutionContext,
   logger: Logger[Future]
 ) extends RpcClient[Future] {
@@ -49,8 +49,10 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
 
   override def send[T](command: Command[T]): Future[T] = {
     val request = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
-    stub.execute(request).map(response => ObjectSerializer.decode[T](response.output))
-
+    stub
+      .withWaitForReady()
+      .execute(request)
+      .map(response => ObjectSerializer.decode[T](response.output))
   }
 
   override def send(snapshot: Snapshot, lastEntry: LogEntry): Future[AppendEntriesResponse] = {
