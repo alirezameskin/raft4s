@@ -40,9 +40,9 @@ private[future] class RpcClientProviderImpl(clients: Map[Node, RpcClient[Future]
     clients.get(serverId) match {
       case Some(client) => client
       case None =>
-        val c = builder.build(serverId)
-        clientsRef.set(clients + (serverId -> c))
-        c
+        val client = builder.build(serverId)
+        clientsRef.set(clients + (serverId -> client))
+        client
     }
   }
 }

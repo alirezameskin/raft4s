@@ -32,17 +32,26 @@ private[future] class RaftImpl(
 
   override def setRunning(isRunning: Boolean): Future[Unit] = Future(isRunningRef.set(isRunning))
 
-  override def getRunning: Future[Boolean] = Future(isRunningRef.get())
+  override def getRunning: Future[Boolean] =
+    Future {
+      isRunningRef.get()
+    }
 
-  override def getCurrentState: Future[NodeState] = Future(nodeStateRef.get())
+  override def getCurrentState: Future[NodeState] =
+    Future {
+      nodeStateRef.get()
+    }
 
-  override def setCurrentState(state: NodeState): Future[Unit] = Future(nodeStateRef.set(state))
+  override def setCurrentState(state: NodeState): Future[Unit] =
+    Future {
+      nodeStateRef.set(state)
+    }
 
   override def background[A](fa: => Future[A]): Future[Unit] =
     ME.attempt(fa).flatMap(_ => ME.unit)
 
   override def updateLastHeartbeat: Future[Unit] =
-    ME.pure {
+    Future {
       heartbeatRef.set(TimeUnit.MILLISECONDS.convert(System.nanoTime(), NANOSECONDS))
     }
 
@@ -72,7 +81,7 @@ private[future] class RaftImpl(
     } yield ()
 
   override def emptyDeferred[A]: Future[Deferred[Future, A]] =
-    ME.pure {
+    Future {
       val promise = Promise[A]
 
       new Deferred[Future, A] {

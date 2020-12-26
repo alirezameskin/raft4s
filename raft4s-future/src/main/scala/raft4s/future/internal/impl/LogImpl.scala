@@ -31,10 +31,14 @@ private[future] class LogImpl(
     }
 
   override def getCommitIndex: Future[Long] =
-    Future.successful(lastCommitIndex.get())
+    Future {
+      lastCommitIndex.get()
+    }
 
   override def setCommitIndex(index: Long): Future[Unit] =
-    Future.successful(lastCommitIndex.set(index))
+    Future {
+      lastCommitIndex.set(index)
+    }
 }
 
 object LogImpl {
@@ -46,5 +50,12 @@ object LogImpl {
     membershipManager: MembershipManager[Future],
     lastCommitIndex: Long
   )(implicit L: Logger[Future], EX: ExecutionContext): raft4s.internal.Log[Future] =
-    new LogImpl(logStorage, snapshotStorage, stateMachine, membershipManager, compactionPolicy, lastCommitIndex)
+    new LogImpl(
+      logStorage,
+      snapshotStorage,
+      stateMachine,
+      membershipManager,
+      compactionPolicy,
+      lastCommitIndex
+    )
 }

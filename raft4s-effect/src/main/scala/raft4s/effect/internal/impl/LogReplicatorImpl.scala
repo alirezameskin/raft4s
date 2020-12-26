@@ -28,9 +28,6 @@ private[effect] class LogReplicatorImpl[F[_]: Concurrent: Logger](
         else
           log
             .getAppendEntries(leaderId, term, nextIndex)
-            .map { req =>
-              req
-            }
             .flatMap(request => clients.send(peerId, request))
 
     } yield response
