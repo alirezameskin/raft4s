@@ -25,7 +25,7 @@ abstract class Log[F[_]] {
 
   val compactionPolicy: LogCompactionPolicy[F]
 
-  def withPermit[A](t: F[A]): F[A]
+  def withPermit[A](t: => F[A]): F[A]
 
   def getCommitIndex: F[Long]
 

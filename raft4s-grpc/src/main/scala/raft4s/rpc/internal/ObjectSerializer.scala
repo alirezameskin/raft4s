@@ -1,10 +1,10 @@
-package raft4s.effect.rpc.grpc.io.internal
-
-import java.io.{ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+package raft4s.rpc.internal
 
 import com.google.protobuf.ByteString
 
-private[grpc] object ObjectSerializer {
+import java.io.{ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+
+private[raft4s] object ObjectSerializer {
 
   def encode[T](obj: T): ByteString = {
     val stream: ByteArrayOutputStream = new ByteArrayOutputStream()

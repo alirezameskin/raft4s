@@ -8,6 +8,7 @@ import raft4s.grpc.protos.JoinRequest
 import raft4s.internal.Logger
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
+import raft4s.rpc.internal.ObjectSerializer
 import raft4s.storage.Snapshot
 import raft4s.{Command, LogEntry, Node}
 
