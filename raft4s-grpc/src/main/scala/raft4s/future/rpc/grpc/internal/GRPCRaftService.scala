@@ -4,14 +4,16 @@ import raft4s._
 import raft4s.grpc.protos
 import raft4s.internal.{Logger, Raft}
 import raft4s.protocol._
-import raft4s.rpc.internal.ObjectSerializer
+import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.storage.Snapshot
 
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-private[grpc] class GRPCRaftService(raft: Raft[Future])(implicit val logger: Logger[Future], EC: ExecutionContext)
-    extends protos.RaftGrpc.Raft {
+private[grpc] class GRPCRaftService(raft: Raft[Future], serializer: Serializer)(implicit
+  val logger: Logger[Future],
+  EC: ExecutionContext
+) extends protos.RaftGrpc.Raft {
 
   override def vote(request: protos.VoteRequest): Future[protos.VoteResponse] =
     raft
@@ -28,7 +30,7 @@ private[grpc] class GRPCRaftService(raft: Raft[Future])(implicit val logger: Log
           request.logTerm,
           request.leaderCommit,
           request.entries
-            .map(entry => LogEntry(entry.term, entry.index, ObjectSerializer.decode[Command[_]](entry.command)))
+            .map(entry => LogEntry(entry.term, entry.index, serializer.decode[Command[_]](entry.command)))
             .toList
         )
       )
@@ -36,8 +38,8 @@ private[grpc] class GRPCRaftService(raft: Raft[Future])(implicit val logger: Log
 
   override def execute(request: protos.CommandRequest): Future[protos.CommandResponse] =
     raft
-      .onCommand(ObjectSerializer.decode[Command[Any]](request.command))
-      .map(response => protos.CommandResponse(ObjectSerializer.encode[Any](response)))
+      .onCommand(serializer.decode[Command[Any]](request.command))
+      .map(response => protos.CommandResponse(serializer.encode[Any](response)))
 
   override def installSnapshot(request: protos.InstallSnapshotRequest): Future[protos.AppendEntriesResponse] =
     raft
@@ -46,10 +48,10 @@ private[grpc] class GRPCRaftService(raft: Raft[Future])(implicit val logger: Log
           Snapshot(
             request.lastIndexId,
             ByteBuffer.wrap(request.bytes.toByteArray),
-            ObjectSerializer.decode[ClusterConfiguration](request.config)
+            serializer.decode[ClusterConfiguration](request.config)
           ),
           request.lastEntry
-            .map(entry => LogEntry(entry.term, entry.index, ObjectSerializer.decode[Command[_]](entry.command)))
+            .map(entry => LogEntry(entry.term, entry.index, serializer.decode[Command[_]](entry.command)))
             .get
         )
       )

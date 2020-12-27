@@ -6,17 +6,18 @@ import raft4s.Node
 import raft4s.effect.rpc.grpc.io.internal.GRPCRaftService
 import raft4s.grpc.protos
 import raft4s.internal.{Logger, Raft}
+import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.rpc.{RpcServer, RpcServerBuilder}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
 
-class GRPCServerBuilder(implicit L: Logger[IO]) extends RpcServerBuilder[IO] {
+class GRPCServerBuilder(implicit S: Serializer, L: Logger[IO]) extends RpcServerBuilder[IO] {
 
   override def build(node: Node, raft: Raft[IO]): IO[RpcServer[IO]] =
     IO.delay {
       val service = protos.RaftGrpc.bindService(
-        new GRPCRaftService(raft),
+        new GRPCRaftService(raft, S),
         scala.concurrent.ExecutionContext.global
       );
 

@@ -8,15 +8,17 @@ import raft4s.grpc.protos.JoinRequest
 import raft4s.internal.Logger
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
-import raft4s.rpc.internal.ObjectSerializer
+import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.storage.Snapshot
 import raft4s.{Command, LogEntry, Node}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
 
-private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(implicit CS: ContextShift[IO], logger: Logger[IO])
-    extends RpcClient[IO] {
+private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel, serializer: Serializer)(implicit
+  CS: ContextShift[IO],
+  logger: Logger[IO]
+) extends RpcClient[IO] {
 
   val stub = protos.RaftGrpc.stub(channel)
 
@@ -40,9 +42,7 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
       appendEntries.prevLogIndex,
       appendEntries.prevLogTerm,
       appendEntries.leaderCommit,
-      appendEntries.entries.map(entry =>
-        protos.LogEntry(entry.term, entry.index, ObjectSerializer.encode[Command[_]](entry.command))
-      )
+      appendEntries.entries.map(entry => protos.LogEntry(entry.term, entry.index, serializer.encode[Command[_]](entry.command)))
     )
 
     val response = stub.appendEntries(request)
@@ -57,12 +57,12 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
   }
 
   override def send[T](command: Command[T]): IO[T] = {
-    val request  = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
+    val request  = protos.CommandRequest(serializer.encode[Command[T]](command))
     val response = stub.execute(request)
 
     IO
       .fromFuture(IO(response))
-      .map(response => ObjectSerializer.decode[T](response.output))
+      .map(response => serializer.decode[T](response.output))
       .handleErrorWith { error =>
         logger.warn(s"An error in sending a command to node: ${address}. Command: ${command}, Error: ${error.getMessage}") *> IO
           .raiseError(error)
@@ -73,9 +73,9 @@ private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel)(impli
     val request =
       protos.InstallSnapshotRequest(
         snapshot.lastIndex,
-        Some(protos.LogEntry(lastEntry.term, lastEntry.index, ObjectSerializer.encode[Command[_]](lastEntry.command))),
+        Some(protos.LogEntry(lastEntry.term, lastEntry.index, serializer.encode[Command[_]](lastEntry.command))),
         protobuf.ByteString.copyFrom(snapshot.bytes.array()),
-        ObjectSerializer.encode[ClusterConfiguration](snapshot.config)
+        serializer.encode[ClusterConfiguration](snapshot.config)
       )
 
     val response = stub.installSnapshot(request)

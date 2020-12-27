@@ -8,13 +8,13 @@ import raft4s.grpc.protos.JoinRequest
 import raft4s.internal.Logger
 import raft4s.protocol._
 import raft4s.rpc.RpcClient
-import raft4s.rpc.internal.ObjectSerializer
+import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.storage.Snapshot
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.{blocking, ExecutionContext, Future}
 
-private[grpc] class GRPCRaftClient(node: Node, channel: ManagedChannel)(implicit
+private[grpc] class GRPCRaftClient(node: Node, channel: ManagedChannel, serializer: Serializer)(implicit
   EC: ExecutionContext,
   logger: Logger[Future]
 ) extends RpcClient[Future] {
@@ -37,9 +37,7 @@ private[grpc] class GRPCRaftClient(node: Node, channel: ManagedChannel)(implicit
       appendEntries.prevLogIndex,
       appendEntries.prevLogTerm,
       appendEntries.leaderCommit,
-      appendEntries.entries.map(entry =>
-        protos.LogEntry(entry.term, entry.index, ObjectSerializer.encode[Command[_]](entry.command))
-      )
+      appendEntries.entries.map(entry => protos.LogEntry(entry.term, entry.index, serializer.encode[Command[_]](entry.command)))
     )
 
     stub
@@ -48,20 +46,20 @@ private[grpc] class GRPCRaftClient(node: Node, channel: ManagedChannel)(implicit
   }
 
   override def send[T](command: Command[T]): Future[T] = {
-    val request = protos.CommandRequest(ObjectSerializer.encode[Command[T]](command))
+    val request = protos.CommandRequest(serializer.encode[Command[T]](command))
     stub
       .withWaitForReady()
       .execute(request)
-      .map(response => ObjectSerializer.decode[T](response.output))
+      .map(response => serializer.decode[T](response.output))
   }
 
   override def send(snapshot: Snapshot, lastEntry: LogEntry): Future[AppendEntriesResponse] = {
     val request =
       protos.InstallSnapshotRequest(
         snapshot.lastIndex,
-        Some(protos.LogEntry(lastEntry.term, lastEntry.index, ObjectSerializer.encode[Command[_]](lastEntry.command))),
+        Some(protos.LogEntry(lastEntry.term, lastEntry.index, serializer.encode[Command[_]](lastEntry.command))),
         protobuf.ByteString.copyFrom(snapshot.bytes.array()),
-        ObjectSerializer.encode[ClusterConfiguration](snapshot.config)
+        serializer.encode[ClusterConfiguration](snapshot.config)
       )
     stub
       .installSnapshot(request)
