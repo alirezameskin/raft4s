@@ -1,39 +1,41 @@
 package raft4s.effect.storage.memory
 
-import cats.Monad
+import cats.effect.Sync
+import cats.effect.concurrent.Ref
+import cats.implicits._
 import raft4s.LogEntry
 import raft4s.storage.LogStorage
 
-import scala.collection.mutable
-
-class MemoryLogStorage[F[_]: Monad] extends LogStorage[F] {
-
-  private val map = mutable.TreeMap.empty[Long, LogEntry]
+class MemoryLogStorage[F[_]: Sync](itemsRef: Ref[F, Map[Long, LogEntry]], lastIndexRef: Ref[F, Long]) extends LogStorage[F] {
 
   override def lastIndex: F[Long] =
-    Monad[F].pure(map.size)
+    lastIndexRef.get
 
   override def get(index: Long): F[LogEntry] =
-    Monad[F].pure(map.get(index).orNull)
+    itemsRef.get.map(_.get(index).orNull)
 
   override def put(index: Long, logEntry: LogEntry): F[LogEntry] =
-    Monad[F].pure {
-      map.put(index, logEntry)
-      logEntry
-    }
+    for {
+      _ <- itemsRef.update(_ + (index -> logEntry))
+      _ <- lastIndexRef.update(i => Math.max(i, index))
+    } yield logEntry
 
   override def deleteBefore(index: Long): F[Unit] =
-    Monad[F].pure {
-      map.keysIterator.takeWhile(_ < index).foreach(map.remove)
-    }
+    for {
+      _ <- itemsRef.update(items => items.filter(_._1 >= index))
+    } yield ()
 
   override def deleteAfter(index: Long): F[Unit] =
-    Monad[F].pure {
-      map.keysIterator.withFilter(_ > index).foreach(map.remove)
-    }
+    for {
+      _ <- itemsRef.update(items => items.filter(_._1 <= index))
+    } yield ()
+
 }
 
 object MemoryLogStorage {
-  def empty[F[_]: Monad]: F[MemoryLogStorage[F]] =
-    Monad[F].pure(new MemoryLogStorage[F])
+  def empty[F[_]: Sync]: F[MemoryLogStorage[F]] =
+    for {
+      items <- Ref.of[F, Map[Long, LogEntry]](Map.empty)
+      last  <- Ref.of[F, Long](0L)
+    } yield new MemoryLogStorage[F](items, last)
 }

@@ -19,8 +19,10 @@ private[effect] class LogImpl[F[_]: Monad: Logger](
 )(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
     extends Log[F] {
 
-  override def withPermit[A](t: => F[A]): F[A] =
-    semaphore.withPermit(t)
+  override def transactional[A](code: => F[A]): F[A] =
+    semaphore.withPermit {
+      code
+    }
 
   override def getCommitIndex: F[Long] =
     commitIndexRef.get

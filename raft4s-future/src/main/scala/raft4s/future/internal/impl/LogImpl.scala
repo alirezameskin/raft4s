@@ -22,7 +22,7 @@ private[future] class LogImpl(
   private val lastCommitIndex = new AtomicLong(lastCommit)
   private val semaphore       = new Semaphore(1)
 
-  override def withPermit[A](code: => Future[A]): Future[A] =
+  override def transactional[A](code: => Future[A]): Future[A] =
     this.synchronized {
       semaphore.acquire()
       val task = code

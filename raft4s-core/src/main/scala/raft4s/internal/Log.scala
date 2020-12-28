@@ -25,14 +25,14 @@ abstract class Log[F[_]] {
 
   val compactionPolicy: LogCompactionPolicy[F]
 
-  def withPermit[A](t: => F[A]): F[A]
+  def transactional[A](t: => F[A]): F[A]
 
   def getCommitIndex: F[Long]
 
   def setCommitIndex(index: Long): F[Unit]
 
   def initialize(): F[Unit] =
-    withPermit {
+    transactional {
       for {
         _                 <- logger.trace("Initializing log")
         snapshot          <- snapshotStorage.retrieveSnapshot()
@@ -97,16 +97,19 @@ abstract class Log[F[_]] {
     } yield AppendEntries(leaderId, term, prevLogIndex, prevLogTerm, commitIndex, entries)
 
   def append[T](term: Long, command: Command[T], deferred: Deferred[F, T]): F[LogEntry] =
-    for {
-      lastIndex <- logStorage.lastIndex
-      logEntry = LogEntry(term, lastIndex + 1, command)
-      _ <- logger.trace(s"Appending a command to the log. Term: ${term}, Index: ${lastIndex + 1}")
-      _ <- logStorage.put(logEntry.index, logEntry)
-      _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
-    } yield logEntry
+    transactional {
+      for {
+        lastIndex <- logStorage.lastIndex
+        logEntry = LogEntry(term, lastIndex + 1, command)
+        _ <- logger.trace(s"Appending a command to the log. Term: ${term}, Index: ${lastIndex + 1} -- ")
+        _ <- logStorage.put(logEntry.index, logEntry)
+        _ = deferreds.put(logEntry.index, deferred.asInstanceOf[Deferred[F, Any]])
+        _ <- logger.trace(s"Entry appended. Term: ${term}, Index: ${lastIndex + 1}")
+      } yield logEntry
+    }
 
   def appendEntries(entries: List[LogEntry], leaderPrevLogIndex: Long, leaderCommit: Long): F[Boolean] =
-    withPermit {
+    transactional {
       for {
         lastIndex    <- logStorage.lastIndex
         appliedIndex <- getCommitIndex
@@ -138,7 +141,7 @@ abstract class Log[F[_]] {
   }
 
   def commitLogs(matchIndex: Map[Node, Long]): F[Boolean] =
-    withPermit {
+    transactional {
       for {
         lastIndex   <- logStorage.lastIndex
         commitIndex <- getCommitIndex
@@ -167,7 +170,7 @@ abstract class Log[F[_]] {
     snapshotStorage.retrieveSnapshot()
 
   def installSnapshot(snapshot: Snapshot, lastEntry: LogEntry): F[Unit] =
-    withPermit {
+    transactional {
       for {
         lastIndex <- logStorage.lastIndex
         _ <-

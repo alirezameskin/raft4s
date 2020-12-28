@@ -3,37 +3,41 @@ package raft4s.future.storage.memory
 import raft4s.LogEntry
 import raft4s.storage.LogStorage
 
-import scala.collection.mutable
+import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}
 
 class MemoryLogStorage(implicit EC: ExecutionContext) extends LogStorage[Future] {
 
-  private val map = mutable.TreeMap.empty[Long, LogEntry]
+  private val lastIndexRef = new AtomicLong(0L)
+  private val itemsRef     = new AtomicReference[Map[Long, LogEntry]]()
 
   override def lastIndex: Future[Long] =
     Future {
-      map.size
+      lastIndexRef.get
     }
 
   override def get(index: Long): Future[LogEntry] =
     Future {
+      val map = itemsRef.get
       map.get(index).orNull
     }
 
   override def put(index: Long, logEntry: LogEntry): Future[LogEntry] =
     Future {
-      map.put(index, logEntry)
+      itemsRef.getAndUpdate(items => items + (index -> logEntry))
+      lastIndexRef.getAndUpdate(i => Math.max(i, index))
+
       logEntry
     }
 
   override def deleteBefore(index: Long): Future[Unit] =
     Future {
-      map.keysIterator.takeWhile(_ < index).foreach(map.remove)
+      itemsRef.getAndUpdate(items => items.filter(_._1 >= index))
     }
 
   override def deleteAfter(index: Long): Future[Unit] =
     Future {
-      map.keysIterator.withFilter(_ > index).foreach(map.remove)
+      itemsRef.getAndUpdate(items => items.filter(_._1 <= index))
     }
 }
 
