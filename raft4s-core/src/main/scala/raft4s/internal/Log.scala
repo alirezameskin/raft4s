@@ -31,6 +31,11 @@ abstract class Log[F[_]] {
 
   def setCommitIndex(index: Long): F[Unit]
 
+  /**
+   * It initializes the `StateMachine`.
+   * If there is a `Snapshot` in the `SnapshotStorage`, it applies it to the `StateMachine` and change the last commit Index.
+   * If the applied index on the `StateMachine` is ahead of the CommitIndex, it commits the remaining Log entries.
+   */
   def initialize(): F[Unit] =
     transactional {
       for {
@@ -48,6 +53,9 @@ abstract class Log[F[_]] {
       } yield ()
     }
 
+  /**
+   * It returns the lasted state of the Log.
+   */
   def state: F[LogState] =
     for {
       lastIndex   <- logStorage.lastIndex
