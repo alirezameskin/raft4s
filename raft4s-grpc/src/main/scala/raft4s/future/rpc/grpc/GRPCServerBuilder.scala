@@ -1,10 +1,10 @@
 package raft4s.future.rpc.grpc
 
 import io.grpc.ServerBuilder
-import raft4s.Node
+import raft4s.{Node, Raft}
 import raft4s.future.rpc.grpc.internal.GRPCRaftService
 import raft4s.grpc.protos
-import raft4s.internal.{Logger, Raft}
+import raft4s.internal.Logger
 import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.rpc.{RpcServer, RpcServerBuilder}
 

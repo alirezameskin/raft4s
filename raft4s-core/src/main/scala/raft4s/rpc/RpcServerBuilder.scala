@@ -1,7 +1,6 @@
 package raft4s.rpc
 
-import raft4s.Node
-import raft4s.internal.Raft
+import raft4s.{Node, Raft}
 
 import scala.annotation.implicitNotFound
 

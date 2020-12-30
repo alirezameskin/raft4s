@@ -4,20 +4,20 @@ import cats.effect.Concurrent
 import cats.effect.concurrent.Ref
 import cats.implicits._
 import raft4s.Node
-import raft4s.internal.{LogReplicator, Logger}
+import raft4s.internal.{LogPropagator, Logger}
 import raft4s.protocol.AppendEntriesResponse
 import raft4s.storage.Snapshot
 
 import scala.collection.Set
 
-private[effect] class LogReplicatorImpl[F[_]: Concurrent: Logger](
+private[effect] class LogPropagatorImpl[F[_]: Concurrent: Logger](
   leaderId: Node,
   log: LogImpl[F],
   clients: RpcClientProviderImpl[F],
   installingRef: Ref[F, Set[Node]]
-) extends LogReplicator[F] {
+) extends LogPropagator[F] {
 
-  def replicatedLogs(peerId: Node, term: Long, nextIndex: Long): F[AppendEntriesResponse] =
+  def propagateLogs(peerId: Node, term: Long, nextIndex: Long): F[AppendEntriesResponse] =
     for {
       _        <- Logger[F].trace(s"Replicating logs to ${peerId}. Term: ${term}, nextIndex: ${nextIndex}")
       _        <- snapshotIsNotInstalling(peerId)
@@ -56,13 +56,13 @@ private[effect] class LogReplicatorImpl[F[_]: Concurrent: Logger](
     } yield ()
 }
 
-object LogReplicatorImpl {
+object LogPropagatorImpl {
   def build[F[_]: Concurrent: Logger](
     leaderId: Node,
     clients: RpcClientProviderImpl[F],
     log: LogImpl[F]
-  ): F[LogReplicatorImpl[F]] =
+  ): F[LogPropagatorImpl[F]] =
     for {
       installing <- Ref.of[F, Set[Node]](Set.empty)
-    } yield new LogReplicatorImpl[F](leaderId, log, clients, installing)
+    } yield new LogPropagatorImpl[F](leaderId, log, clients, installing)
 }

@@ -1,8 +1,8 @@
-package raft4s.internal
+package raft4s
 
 import cats.implicits._
 import cats.{Applicative, Monad, MonadError}
-import raft4s._
+import raft4s.internal._
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.protocol._
 
@@ -24,7 +24,7 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
 
   val membershipManager: MembershipManager[F]
 
-  val logReplicator: LogReplicator[F]
+  val logReplicator: LogPropagator[F]
 
   def setRunning(isRunning: Boolean): F[Unit]
 
@@ -331,7 +331,7 @@ abstract private[raft4s] class Raft[F[_]: Monad] extends ErrorLogging[F] {
         background {
           errorLogging(s"Replicating logs to ${peerId}, Term: ${term}, NextIndex: ${nextIndex}") {
             for {
-              response <- logReplicator.replicatedLogs(peerId, term, nextIndex)
+              response <- logReplicator.propagateLogs(peerId, term, nextIndex)
               _        <- this.onReceive(response)
             } yield ()
           }

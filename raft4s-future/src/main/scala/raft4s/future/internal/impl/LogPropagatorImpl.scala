@@ -1,21 +1,21 @@
 package raft4s.future.internal.impl
 
 import raft4s.Node
-import raft4s.internal.{Log, LogReplicator, Logger, RpcClientProvider}
+import raft4s.internal.{Log, LogPropagator, Logger, RpcClientProvider}
 import raft4s.protocol.AppendEntriesResponse
 import raft4s.storage.Snapshot
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
-private[future] class LogReplicatorImpl(leaderId: Node, log: Log[Future], clients: RpcClientProvider[Future])(implicit
+private[future] class LogPropagatorImpl(leaderId: Node, log: Log[Future], clients: RpcClientProvider[Future])(implicit
   EC: ExecutionContext,
   logger: Logger[Future]
-) extends LogReplicator[Future] {
+) extends LogPropagator[Future] {
 
   private val installingRef = new AtomicReference[Set[Node]](Set.empty)
 
-  override def replicatedLogs(peerId: Node, term: Long, nextIndex: Long): Future[AppendEntriesResponse] =
+  override def propagateLogs(peerId: Node, term: Long, nextIndex: Long): Future[AppendEntriesResponse] =
     for {
       _        <- logger.trace(s"Replicating logs to ${peerId}. Term: ${term}, nextIndex: ${nextIndex}")
       _        <- snapshotIsNotInstalling(peerId)
@@ -57,10 +57,10 @@ private[future] class LogReplicatorImpl(leaderId: Node, log: Log[Future], client
     }
 }
 
-object LogReplicatorImpl {
+object LogPropagatorImpl {
   def build(nodeId: Node, clients: RpcClientProvider[Future], log: Log[Future])(implicit
     EC: ExecutionContext,
     L: Logger[Future]
-  ): LogReplicator[Future] =
-    new LogReplicatorImpl(nodeId, log, clients)
+  ): LogPropagator[Future] =
+    new LogPropagatorImpl(nodeId, log, clients)
 }

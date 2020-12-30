@@ -2,11 +2,11 @@ package raft4s.effect.rpc.grpc.io.internal
 
 import cats.effect.IO
 import raft4s.grpc.protos
-import raft4s.internal.{Logger, Raft}
+import raft4s.internal.Logger
 import raft4s.protocol._
 import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.storage.Snapshot
-import raft4s.{Command, LogEntry, Node}
+import raft4s.{Command, LogEntry, Node, Raft}
 
 import java.nio.ByteBuffer
 import scala.concurrent.Future

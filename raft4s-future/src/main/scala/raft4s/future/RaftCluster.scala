@@ -2,7 +2,6 @@ package raft4s.future
 
 import cats.implicits._
 import raft4s._
-import raft4s.future.internal.impl.RaftImpl
 import raft4s.internal.Logger
 import raft4s.rpc.{RpcClientBuilder, RpcServerBuilder}
 

@@ -1,7 +1,8 @@
-package raft4s.future.internal.impl
+package raft4s.future
 
 import cats.MonadError
 import raft4s._
+import raft4s.future.internal.impl._
 import raft4s.internal._
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.rpc.RpcClientBuilder
@@ -16,7 +17,7 @@ private[future] class RaftImpl(
   val membershipManager: MembershipManager[Future],
   val clientProvider: RpcClientProvider[Future],
   val leaderAnnouncer: LeaderAnnouncer[Future],
-  val logReplicator: LogReplicator[Future],
+  val logReplicator: LogPropagator[Future],
   val log: Log[Future],
   val storage: Storage[Future],
   state: NodeState
@@ -119,7 +120,7 @@ object RaftImpl {
       clientProvider = RpcClientProviderImpl.build
       membership     = MembershipManagerImpl.build(config.members.toSet + config.local)
       log            = LogImpl.build(storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
-      replicator     = LogReplicatorImpl.build(config.local, clientProvider, log)
+      replicator     = LogPropagatorImpl.build(config.local, clientProvider, log)
       announcer      = LeaderAnnouncerImpl.build
     } yield new RaftImpl(config, membership, clientProvider, announcer, replicator, log, storage, nodeState)
 }

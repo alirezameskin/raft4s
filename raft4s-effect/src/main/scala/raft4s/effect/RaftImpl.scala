@@ -1,11 +1,12 @@
-package raft4s.effect.internal.impl
+package raft4s.effect
 
 import cats.effect.concurrent.Ref
 import cats.effect.{Concurrent, Sync, Timer}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import raft4s._
-import raft4s.internal.{Deferred, Logger, Raft}
+import raft4s.effect.internal.impl._
+import raft4s.internal.{Deferred, Logger}
 import raft4s.node.{FollowerNode, LeaderNode, NodeState}
 import raft4s.rpc.RpcClientBuilder
 
@@ -17,7 +18,7 @@ private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
   val membershipManager: MembershipManagerImpl[F],
   val clientProvider: RpcClientProviderImpl[F],
   val leaderAnnouncer: LeaderAnnouncerImpl[F],
-  val logReplicator: LogReplicatorImpl[F],
+  val logReplicator: LogPropagatorImpl[F],
   val log: LogImpl[F],
   val storage: Storage[F],
   stateRef: Ref[F, NodeState],
@@ -104,7 +105,7 @@ object RaftImpl {
       membership     <- MembershipManagerImpl.build[F](config.members.toSet + config.local)
       log <- LogImpl
         .build[F](storage.logStorage, storage.snapshotStorage, stateMachine, compactionPolicy, membership, appliedIndex)
-      replicator <- LogReplicatorImpl.build[F](config.local, clientProvider, log)
+      replicator <- LogPropagatorImpl.build[F](config.local, clientProvider, log)
       announcer  <- LeaderAnnouncerImpl.build[F]
       heartbeat  <- Ref.of[F, Long](0L)
       ref        <- Ref.of[F, NodeState](nodeState)
