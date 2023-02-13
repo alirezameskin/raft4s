@@ -1,14 +1,14 @@
 package raft4s.effect.internal.impl
 
-import cats.effect.Concurrent
-import cats.effect.concurrent.{Ref, Semaphore}
+import cats.effect.{Concurrent, MonadCancel, Ref}
+import cats.effect.Ref
+import cats.effect.std.Semaphore
 import cats.implicits._
-import cats.{Monad, MonadError}
 import raft4s.internal.{Log, Logger, MembershipManager}
 import raft4s.storage.{LogStorage, SnapshotStorage}
 import raft4s.{LogCompactionPolicy, StateMachine}
 
-private[effect] class LogImpl[F[_]: Monad: Logger](
+private[effect] class LogImpl[F[_]: Logger](
   val logStorage: LogStorage[F],
   val snapshotStorage: SnapshotStorage[F],
   val stateMachine: StateMachine[F],
@@ -16,13 +16,11 @@ private[effect] class LogImpl[F[_]: Monad: Logger](
   val compactionPolicy: LogCompactionPolicy[F],
   commitIndexRef: Ref[F, Long],
   semaphore: Semaphore[F]
-)(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
+)(implicit val ME: MonadCancel[F, Throwable], val logger: Logger[F])
     extends Log[F] {
 
   override def transactional[A](code: => F[A]): F[A] =
-    semaphore.withPermit {
-      code
-    }
+    semaphore.permit.use(_ => code)
 
   override def getCommitIndex: F[Long] =
     commitIndexRef.get

@@ -1,7 +1,6 @@
 package raft4s.effect.internal.impl
 
-import cats.effect.Sync
-import cats.effect.concurrent.Ref
+import cats.effect.{Ref, Sync}
 import cats.implicits._
 import cats.{Monad, MonadError}
 import raft4s.internal.{ErrorLogging, Logger, RpcClientProvider}

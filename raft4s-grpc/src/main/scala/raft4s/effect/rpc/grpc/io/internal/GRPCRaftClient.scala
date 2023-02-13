@@ -1,6 +1,6 @@
 package raft4s.effect.rpc.grpc.io.internal
 
-import cats.effect.{ContextShift, IO}
+import cats.effect.IO
 import com.google.protobuf
 import io.grpc.ManagedChannel
 import raft4s.grpc.protos
@@ -16,7 +16,6 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
 
 private[grpc] class GRPCRaftClient(address: Node, channel: ManagedChannel, serializer: Serializer)(implicit
-  CS: ContextShift[IO],
   logger: Logger[IO]
 ) extends RpcClient[IO] {
 

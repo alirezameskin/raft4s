@@ -1,7 +1,6 @@
 package raft4s.effect.storage.memory
 
-import cats.effect.Sync
-import cats.effect.concurrent.Ref
+import cats.effect.{Ref, Sync}
 import cats.implicits._
 import raft4s.LogEntry
 import raft4s.storage.LogStorage

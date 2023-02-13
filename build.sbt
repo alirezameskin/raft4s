@@ -1,9 +1,11 @@
 lazy val Version           = "0.0.3"
 lazy val ScalaVersion      = "2.13.10"
-lazy val CatsEffectVersion = "2.3.0"
-lazy val OdinVersion       = "0.9.1"
+lazy val CatsEffectVersion = "3.4.6"
+lazy val OdinVersion       = "0.13.0"
 lazy val ScalaTestVersion  = "3.2.0"
 lazy val RocksDbVersion    = "6.6.4"
+
+lazy val CatsEffect = "org.typelevel" %% "cats-effect" % CatsEffectVersion
 
 val GlobalSettingsGroup: Seq[Setting[_]] = Seq(
   version := Version,
@@ -30,7 +32,7 @@ lazy val effect = (project in file("raft4s-effect"))
   .settings(
     name := "raft4s-effect",
     libraryDependencies ++= Seq(
-      "org.typelevel"        %% "cats-effect" % CatsEffectVersion,
+      CatsEffect,
       "com.github.valskalla" %% "odin-core"   % OdinVersion,
       "org.scalatest"        %% "scalatest"   % ScalaTestVersion % Test
     )
@@ -57,6 +59,7 @@ lazy val grpc = (project in file("raft4s-grpc"))
       scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
     ),
     libraryDependencies ++= Seq(
+      CatsEffect,
       "com.thesamet.scalapb" %% "scalapb-runtime"      % scalapb.compiler.Version.scalapbVersion % "protobuf",
       "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
       "io.grpc"               % "grpc-netty"           % scalapb.compiler.Version.grpcJavaVersion,
@@ -71,6 +74,7 @@ lazy val rocksdb = (project in file("raft4s-rocksdb"))
   .settings(
     name := "raft4s-rocksdb",
     libraryDependencies ++= Seq(
+      CatsEffect,
       "org.rocksdb" % "rocksdbjni" % RocksDbVersion
     )
   )

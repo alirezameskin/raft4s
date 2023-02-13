@@ -1,7 +1,6 @@
 package raft4s.effect
 
-import cats.effect.concurrent.Ref
-import cats.effect.{Concurrent, Sync, Timer}
+import cats.effect.{Async, Concurrent, Ref, Sync, Temporal}
 import cats.implicits._
 import cats.{Monad, MonadError, Parallel}
 import raft4s._
@@ -13,7 +12,7 @@ import raft4s.rpc.RpcClientBuilder
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
-private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
+private[effect] class RaftImpl[F[_]: Async](
   val config: Configuration,
   val membershipManager: MembershipManagerImpl[F],
   val clientProvider: RpcClientProviderImpl[F],
@@ -24,8 +23,10 @@ private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
   stateRef: Ref[F, NodeState],
   lastHeartbeatRef: Ref[F, Long],
   isRunning: Ref[F, Boolean]
-)(implicit val ME: MonadError[F, Throwable], val logger: Logger[F])
+)(implicit val logger: Logger[F])
     extends Raft[F] {
+
+  final implicit val ME: MonadError[F, Throwable] = Async[F]
 
   override val nodeId: Node = config.local
 
@@ -47,30 +48,30 @@ private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
   override def updateLastHeartbeat: F[Unit] =
     for {
       _    <- logger.trace(s"Update Last heartbeat time")
-      time <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-      _    <- lastHeartbeatRef.set(time)
+      time <- Temporal[F].monotonic
+      _    <- lastHeartbeatRef.set(time.toMillis)
     } yield ()
 
   override def electionTimeoutElapsed: F[Boolean] =
     for {
       node <- getCurrentState
       lh   <- lastHeartbeatRef.get
-      now  <- Timer[F].clock.monotonic(TimeUnit.MILLISECONDS)
-    } yield node.isInstanceOf[LeaderNode] || (now - lh < config.heartbeatTimeoutMillis)
+      now  <- Temporal[F].monotonic
+    } yield node.isInstanceOf[LeaderNode] || (now.toMillis - lh < config.heartbeatTimeoutMillis)
 
   override def delayElection(): F[Unit] =
     for {
       millis <- random(config.electionMinDelayMillis, config.electionMaxDelayMillis)
       delay  <- Sync[F].delay(FiniteDuration(millis, TimeUnit.MILLISECONDS))
       _      <- logger.trace(s"Delay to start the election ${delay}")
-      _      <- Timer[F].sleep(delay)
+      _      <- Temporal[F].sleep(delay)
     } yield ()
 
   override def schedule(delay: FiniteDuration)(fa: => F[Unit]): F[Unit] =
     Monad[F]
       .foreverM {
         for {
-          _ <- Timer[F].sleep(delay)
+          _ <- Temporal[F].sleep(delay)
           _ <- fa
         } yield ()
       }
@@ -78,11 +79,11 @@ private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
 
   override def emptyDeferred[A]: F[Deferred[F, A]] =
     for {
-      underlying <- cats.effect.concurrent.Deferred[F, A]
+      underlying <- cats.effect.Deferred[F, A]
     } yield new Deferred[F, A] {
       override def get: F[A] = underlying.get
 
-      override def complete(a: A): F[Unit] = underlying.complete(a)
+      override def complete(a: A): F[Unit] = underlying.complete(a).void
     }
 
   private def random(min: Int, max: Int): F[Int] =
@@ -91,7 +92,7 @@ private[effect] class RaftImpl[F[_]: Monad: Concurrent: Timer](
 
 object RaftImpl {
 
-  def build[F[_]: Monad: Concurrent: Parallel: Timer: RpcClientBuilder: Logger](
+  def build[F[_]: Async: Parallel: RpcClientBuilder: Logger](
     config: Configuration,
     storage: Storage[F],
     stateMachine: StateMachine[F],

@@ -1,6 +1,7 @@
 package raft4s.effect.rpc.grpc.io.internal
 
 import cats.effect.IO
+import cats.effect.unsafe.IORuntime
 import raft4s.grpc.protos
 import raft4s.internal.Logger
 import raft4s.protocol._
@@ -11,7 +12,10 @@ import raft4s.{Command, LogEntry, Node, Raft}
 import java.nio.ByteBuffer
 import scala.concurrent.Future
 
-private[grpc] class GRPCRaftService(raft: Raft[IO], serializer: Serializer)(implicit val logger: Logger[IO])
+private[grpc] class GRPCRaftService(raft: Raft[IO], serializer: Serializer)(
+  implicit val logger: Logger[IO],
+  runtime: IORuntime,
+)
     extends protos.RaftGrpc.Raft {
 
   override def vote(request: protos.VoteRequest): Future[protos.VoteResponse] =

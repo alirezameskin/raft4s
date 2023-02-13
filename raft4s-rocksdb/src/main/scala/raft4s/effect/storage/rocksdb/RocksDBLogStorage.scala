@@ -108,7 +108,7 @@ object RocksDBLogStorage {
     } yield db
 
     for {
-      _  <- Resource.liftF(Try(jrocks.RocksDB.loadLibrary()).liftTo[F])
+      _  <- Resource.eval(Try(jrocks.RocksDB.loadLibrary()).liftTo[F])
       db <- Resource.make(acquire)(d => Sync[F].delay(d.close()))
 
     } yield new RocksDBLogStorage[F](db)

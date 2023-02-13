@@ -1,8 +1,7 @@
 package raft4s.effect.storage.memory
 
 import cats.Monad
-import cats.effect.Concurrent
-import cats.effect.concurrent.Ref
+import cats.effect.{Concurrent, Ref}
 import cats.implicits._
 import raft4s.storage.{Snapshot, SnapshotStorage}
 

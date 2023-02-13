@@ -1,7 +1,6 @@
 package raft4s.effect.internal.impl
 
-import cats.effect.Concurrent
-import cats.effect.concurrent.Ref
+import cats.effect.{Concurrent, Ref}
 import cats.implicits._
 import raft4s.Node
 import raft4s.internal.{LogPropagator, Logger}

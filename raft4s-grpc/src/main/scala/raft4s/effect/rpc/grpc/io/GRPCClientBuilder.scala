@@ -1,14 +1,14 @@
 package raft4s.effect.rpc.grpc.io
 
 import _root_.io.grpc.ManagedChannelBuilder
-import cats.effect.{ContextShift, IO}
+import cats.effect.IO
 import raft4s.Node
 import raft4s.effect.rpc.grpc.io.internal.GRPCRaftClient
 import raft4s.internal.Logger
 import raft4s.rpc.grpc.serializer.Serializer
 import raft4s.rpc.{RpcClient, RpcClientBuilder}
 
-class GRPCClientBuilder(implicit L: Logger[IO], CS: ContextShift[IO], S: Serializer) extends RpcClientBuilder[IO] {
+class GRPCClientBuilder(implicit L: Logger[IO], S: Serializer) extends RpcClientBuilder[IO] {
 
   override def build(node: Node): RpcClient[IO] = {
 

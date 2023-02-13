@@ -1,7 +1,6 @@
 package raft4s.effect.storage.file
 
-import cats.effect.Sync
-import cats.effect.concurrent.Ref
+import cats.effect.{Ref, Sync}
 import cats.implicits._
 import raft4s.internal.{ErrorLogging, Logger}
 import raft4s.storage.Snapshot

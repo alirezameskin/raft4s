@@ -2,7 +2,7 @@ package raft4s.effect.internal.impl
 
 import cats.Monad
 import cats.effect.Concurrent
-import cats.effect.concurrent.{Deferred, Ref}
+import cats.effect.{Deferred, Ref}
 import cats.implicits._
 import raft4s.Node
 import raft4s.internal.{LeaderAnnouncer, Logger}

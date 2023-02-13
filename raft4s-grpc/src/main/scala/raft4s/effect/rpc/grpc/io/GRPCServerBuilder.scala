@@ -2,6 +2,7 @@ package raft4s.effect.rpc.grpc.io
 
 import _root_.io.grpc.ServerBuilder
 import cats.effect.IO
+import cats.effect.unsafe.IORuntime
 import raft4s.{Node, Raft}
 import raft4s.effect.rpc.grpc.io.internal.GRPCRaftService
 import raft4s.grpc.protos
@@ -12,7 +13,7 @@ import raft4s.rpc.{RpcServer, RpcServerBuilder}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.blocking
 
-class GRPCServerBuilder(implicit S: Serializer, L: Logger[IO]) extends RpcServerBuilder[IO] {
+class GRPCServerBuilder(implicit S: Serializer, L: Logger[IO], R: IORuntime) extends RpcServerBuilder[IO] {
 
   override def build(node: Node, raft: Raft[IO]): IO[RpcServer[IO]] =
     IO.delay {
