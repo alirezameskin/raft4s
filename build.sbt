@@ -3,7 +3,7 @@ lazy val ScalaVersion      = "2.13.10"
 lazy val CatsEffectVersion = "3.4.6"
 lazy val OdinVersion       = "0.13.0"
 lazy val ScalaTestVersion  = "3.2.15"
-lazy val RocksDbVersion    = "6.6.4"
+lazy val RocksDbVersion    = "7.9.2"
 
 lazy val CatsEffect = "org.typelevel" %% "cats-effect" % CatsEffectVersion
 
