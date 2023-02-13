@@ -1,5 +1,5 @@
 lazy val Version           = "0.0.3"
-lazy val ScalaVersion      = "2.13.4"
+lazy val ScalaVersion      = "2.13.10"
 lazy val CatsEffectVersion = "2.3.0"
 lazy val OdinVersion       = "0.9.1"
 lazy val ScalaTestVersion  = "3.2.0"
